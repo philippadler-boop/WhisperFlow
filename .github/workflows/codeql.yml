@@ -15,7 +15,9 @@ jobs:
     name: codeql
     runs-on: ubuntu-latest
     permissions:
-      security-events: write
+      # No security-events: write -- upload is disabled below (private repo,
+      # no GitHub Advanced Security), so the action never calls the
+      # code-scanning API that permission would gate.
       contents: read
       actions: read
     steps:
@@ -35,3 +37,10 @@ jobs:
           languages: python
       - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         if: steps.check.outputs.has_python == 'true'
+        with:
+          # This is a private repo without GitHub Advanced Security, so the
+          # Security tab / code scanning API isn't available to upload to
+          # (SARIF upload fails with "Code scanning is not enabled for this
+          # repository"). Analysis still runs and findings are visible in
+          # this job's log; revisit if the repo goes public or gets GHAS.
+          upload: false
