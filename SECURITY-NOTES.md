@@ -95,9 +95,8 @@ Interactive work (you running `gh` commands yourself, approving each
 merge) uses your own personal `gh auth login` session -- that's fine,
 since a human is the one deciding what each command does.
 
-**For any automation that acts without you watching (M8 onward), use a
-token scoped to this repo only, never your account-wide `gh auth`
-session or an org-wide token:**
+**Original plan (M6), superseded by what M8 actually implemented (see
+below):** a fine-grained PAT scoped to this repo only --
 
 1. GitHub -> Settings -> Developer settings -> Fine-grained personal
    access tokens -> Generate new token.
@@ -111,12 +110,28 @@ session or an org-wide token:**
    Actions) -- never in this repo's files, never in `CLAUDE.md`, never
    pasted into a Claude Code session's context.
 
-As of this writing, no such token has been created yet -- M8 (unattended
-work) hasn't started, and there's nothing to scope a token for until then.
-This section is the documented decision of *what scope to use when that
-token is created*, per decision 7's "set up as part of V1, not deferred"
--- the policy exists now; the token itself gets created when M8 actually
-needs it, per M6.
+**What M8 actually uses (2026-09-04, deliberate deviation, logged in
+ai-dev-pipeline's decisions.md):** the Claude Code GitHub Action, which
+authenticates as the shared **Claude GitHub App** rather than a
+repo-scoped fine-grained PAT. Installed via the officially guided
+`/install-github-app` flow. This app's permission set is broader than the
+plan above -- Actions, Checks, Contents, Discussions, Issues, Pull
+requests, Repository hooks, and Workflows, all read-write -- because the
+app is shared across every Claude GitHub feature (this action, Code
+Review, web auto-fix), not scoped to just this one use case. The
+alternative that would have matched the original plan exactly -- a custom
+GitHub App requesting only Contents+Issues+PRs -- was considered and
+rejected as disproportionate manual setup (registering an app, generating
+and storing a private key, extra workflow wiring) for a solo hobby
+account where decision 3 already accepts "broader autonomy is
+acceptable" as the starting posture.
+
+Separately, the credential authenticating the action itself is a
+`CLAUDE_CODE_OAUTH_TOKEN` (generated via `claude setup-token`, stored as a
+GitHub Actions secret on this repo), drawing from the existing Claude
+subscription's usage allowance rather than a separate API key -- one
+billing surface instead of two, not a security-relevant choice on its
+own.
 
 ## Container boundary for unattended work
 
