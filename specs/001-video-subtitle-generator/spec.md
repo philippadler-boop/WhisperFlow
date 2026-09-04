@@ -8,6 +8,15 @@
 
 **Input**: User description: "A tool that takes a given video and generates subtitles in a chosen language." (from `docs/ideas/initial-idea.md`)
 
+## Clarifications
+
+### Session 2026-09-04
+
+- Q: What is the maximum video length the tool must support in v1? → A: ~2 hours
+- Q: If processing a video is interrupted partway through, must the tool resume from where it left off, or is restarting from scratch acceptable for v1? → A: Restart from scratch
+- Q: Should the CLI show progress feedback (e.g. percentage complete or elapsed/estimated time) while a video is being processed? → A: Yes, a progress indicator
+- Q: Is there a maximum acceptable processing time for the longest supported video (2 hours), separate from the existing 5-minute target for a 10-minute video? → A: Roughly proportional to the 10-minute/5-minute target (about 1 minute of processing per 2 minutes of video)
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Transcribe a video into subtitles (Priority: P1)
@@ -73,9 +82,16 @@ subtitle file reflects the edits rather than the original generated text.
   length?
 - How does the system handle audio in a language it cannot detect or does
   not support?
+- What happens if processing is interrupted partway through (e.g. a
+  crash or the machine sleeps)? The tool does not resume from a
+  checkpoint for v1; the user reruns the command and processing restarts
+  from the beginning of the video.
 
 ## Out of Scope for v1
 
+- **Resumable processing**: Saving progress and resuming an interrupted
+  job from a checkpoint is deferred to a future release; v1 always
+  restarts from the beginning of the video. (Resolved 2026-09-04.)
 - **Translation**: Generating subtitles in a language different from the
   video's original spoken audio is deferred to a future release. v1
   produces subtitles only in the video's source language. (Resolved
@@ -112,6 +128,9 @@ subtitle file reflects the edits rather than the original generated text.
   lines before treating the output as final.
 - **FR-010**: Users MUST be able to edit the text of individual subtitle
   lines, with edits reflected in the exported subtitle file.
+- **FR-011**: System MUST show the user ongoing progress (e.g., percent
+  complete or elapsed time) while a video is being processed, rather than
+  appearing unresponsive until completion.
 
 ### Key Entities
 
@@ -141,6 +160,10 @@ subtitle file reflects the edits rather than the original generated text.
 - **SC-005**: A user attempting subtitle generation for the first time
   succeeds in producing a usable subtitle file on their first attempt at
   least 90% of the time.
+- **SC-006**: Processing time scales roughly proportionally with video
+  length (about the same ratio as SC-002's 10-minutes-of-video-to-5-
+  minutes-of-processing target), such that a video at the maximum
+  supported length (2 hours) completes in approximately 1 hour.
 
 ## Assumptions
 
@@ -152,8 +175,8 @@ subtitle file reflects the edits rather than the original generated text.
   timing expectations in Success Criteria; minimum hardware requirements
   are a technical detail for the design phase, not this spec.
 - Supported input video formats are common container formats (e.g., MP4,
-  MOV, MKV); the maximum supported video length for v1 is capped (e.g.,
-  around 2 hours) to bound processing time and cost.
+  MOV, MKV); the maximum supported video length for v1 is 2 hours (see
+  Clarifications).
 - The default, and initially only, output subtitle format is the
   industry-standard `.srt` format; other formats (e.g., `.vtt`) are
   candidates for a later version.

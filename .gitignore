@@ -1,0 +1,14 @@
+# Claude Code: personal/machine-local permission grants, not shared config
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# WhisperFlow runtime artifacts (not source)
+*.srt
+!samples/**/*.srt
