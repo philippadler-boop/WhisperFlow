@@ -30,13 +30,44 @@ MAX_DURATION_SECONDS: float = 7200.0
 def _format_hms(total_seconds: float) -> str:
     """Format a duration in seconds as ``H:MM:SS``.
 
-    Matches the style of contracts/cli.md's example error message
-    (``got 2:14:03``). Negative input is clamped to zero.
+    Matches the style of contracts/cli.md's example error message for the
+    *actual/offending* duration (``got 2:14:03``). Negative input is
+    clamped to zero.
     """
     total_seconds = max(0, int(round(total_seconds)))
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+
+def _format_duration_human(total_seconds: float) -> str:
+    """Format a duration in seconds as a rounded, human-friendly phrase.
+
+    Matches the style of contracts/cli.md's example error message for the
+    *configured maximum* duration (``maximum supported length of 2
+    hours``) -- unlike `_format_hms`, whole-hour values are rendered as a
+    plain "N hour(s)" phrase rather than ``2:00:00``.
+
+    The contract's own example only ever shows a whole-hour maximum, but a
+    future config could set a non-whole-hour max (e.g. 90 minutes), so
+    non-whole-hour values are decomposed into hours/minutes/seconds and
+    only the non-zero components are joined (e.g. "1 hour 30 minutes",
+    "45 seconds") to keep the phrasing natural rather than falling back to
+    `H:MM:SS`. Negative input is clamped to zero.
+    """
+    total_seconds = max(0, int(round(total_seconds)))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    def _pluralize(value: int, unit: str) -> str:
+        return f"{value} {unit}{'' if value == 1 else 's'}"
+
+    parts = [
+        _pluralize(value, unit)
+        for value, unit in ((hours, "hour"), (minutes, "minute"), (seconds, "second"))
+        if value
+    ]
+    return " ".join(parts) if parts else "0 seconds"
 
 
 class WhisperFlowError(Exception):
@@ -97,7 +128,8 @@ class MaxDurationExceededError(WhisperFlowError):
         self.max_duration_seconds = max_duration_seconds
         message = (
             "video exceeds maximum supported length of "
-            f"{_format_hms(max_duration_seconds)} (got {_format_hms(duration_seconds)})"
+            f"{_format_duration_human(max_duration_seconds)} "
+            f"(got {_format_hms(duration_seconds)})"
         )
         super().__init__(message)
 

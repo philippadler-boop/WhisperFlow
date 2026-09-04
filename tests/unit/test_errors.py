@@ -9,6 +9,8 @@ raw values.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from lib.errors import (
@@ -34,19 +36,25 @@ class TestUnsupportedVideoFormatError:
         err = UnsupportedVideoFormatError("/videos/clip.avi", detected_format="avi")
         message = str(err)
         assert "avi" in message
-        assert "/videos/clip.avi" in message
+        # Compare via Path/str(Path(...)) rather than a literal "/"-separated
+        # string, since pathlib normalizes separators to "\\" in str() on
+        # Windows.
+        assert str(Path("/videos/clip.avi")) in message
         for fmt in SUPPORTED_VIDEO_FORMATS:
             assert fmt in message
 
     def test_message_without_detected_format(self):
         err = UnsupportedVideoFormatError("/videos/mystery.bin")
         message = str(err)
-        assert "/videos/mystery.bin" in message
+        assert str(Path("/videos/mystery.bin")) in message
         assert "mp4" in message
 
     def test_exposes_path_and_detected_format_attributes(self):
         err = UnsupportedVideoFormatError("/videos/clip.avi", detected_format="avi")
-        assert str(err.path) == "/videos/clip.avi"
+        # Compare as Path objects (not strings) so this passes regardless of
+        # the platform's path separator -- pathlib normalizes "/" to "\\" in
+        # str() on Windows, which a literal string comparison wouldn't survive.
+        assert err.path == Path("/videos/clip.avi")
         assert err.detected_format == "avi"
 
     def test_raisable_and_catchable(self):
@@ -62,8 +70,21 @@ class TestMaxDurationExceededError:
         # 2:14:03 = 2 * 3600 + 14 * 60 + 3
         err = MaxDurationExceededError(duration_seconds=2 * 3600 + 14 * 60 + 3)
         message = str(err)
+        # Actual/offending duration is precise H:MM:SS...
         assert "2:14:03" in message
-        assert "2:00:00" in message
+        # ...but the configured maximum is a rounded human phrase, per
+        # contracts/cli.md's example ("maximum supported length of 2 hours").
+        assert "2 hours" in message
+        assert "2:00:00" not in message
+
+    def test_message_matches_contract_example_exactly(self):
+        # Pins contracts/cli.md's literal example end-to-end so a future
+        # change to either formatter can't silently drift from the contract:
+        # "video exceeds maximum supported length of 2 hours (got 2:14:03)"
+        err = MaxDurationExceededError(duration_seconds=2 * 3600 + 14 * 60 + 3)
+        assert str(err) == (
+            "video exceeds maximum supported length of 2 hours (got 2:14:03)"
+        )
 
     def test_default_max_duration_is_two_hours(self):
         assert MAX_DURATION_SECONDS == 7200.0
@@ -76,8 +97,17 @@ class TestMaxDurationExceededError:
     def test_custom_max_duration_is_respected(self):
         err = MaxDurationExceededError(duration_seconds=100.0, max_duration_seconds=60.0)
         assert err.max_duration_seconds == 60.0
-        assert "0:01:00" in str(err)
+        # Max duration (60s = 1 minute, not a whole hour) still renders as a
+        # human phrase, not H:MM:SS.
+        assert "1 minute" in str(err)
+        # Actual/offending duration stays precise H:MM:SS.
         assert "0:01:40" in str(err)
+
+    def test_custom_max_duration_handles_non_whole_hours(self):
+        # A hypothetical 90-minute max should read naturally, not fall back
+        # to H:MM:SS just because it isn't a whole number of hours.
+        err = MaxDurationExceededError(duration_seconds=6000.0, max_duration_seconds=5400.0)
+        assert "1 hour 30 minutes" in str(err)
 
     def test_rejects_duration_within_the_limit(self):
         with pytest.raises(ValueError):
