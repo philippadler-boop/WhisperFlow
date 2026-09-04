@@ -17,15 +17,22 @@ jobs:
     # doesn't weaken the gate for anyone who can actually add a reference.
     if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
-      - name: Require an FR- ID or issue reference in the PR title or body
+      - name: Require an FR- ID or issue reference in the PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | grep -Eiq '(FR-[0-9]{3,}|#[0-9]+)'; then
-            echo "Traceability reference found."
+          # Title only, deliberately -- not the body. The body is often
+          # long, pasted, or auto-generated (changelogs, logs, quoted
+          # text) and can easily contain an incidental "#1234"-shaped
+          # string that refers to something in a completely different
+          # repo, which would let this check pass without the PR
+          # actually tracing to anything real here. The title is short
+          # and hand-written, so it's the only place a match means what
+          # it looks like it means.
+          if printf '%s' "$PR_TITLE" | grep -Eiq '(FR-[0-9]{3,}|#[0-9]+)'; then
+            echo "Traceability reference found in PR title."
           else
-            echo "::error::PR title/body must reference an FR-xxx requirement ID or a GitHub issue (#N)."
+            echo "::error::PR title must reference an FR-xxx requirement ID or a GitHub issue (#N)."
             echo "This is a hard gate per constitution.md and decisions.md (decision 5) --"
             echo "unattended agents (M8) won't self-police this link the way a human would."
             exit 1
