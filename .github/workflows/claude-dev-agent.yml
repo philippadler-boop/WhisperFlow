@@ -1,0 +1,73 @@
+name: Claude Dev Agent
+
+# M8 (unattended work): separate from claude.yml on purpose. claude.yml
+# stays the interactive @claude-mention workflow; this one picks up an
+# issue with no human in the loop once it's labeled `claude-dev`, and runs
+# in automation mode (a `prompt` input, so Claude doesn't wait for a
+# mention -- see code.claude.com/docs/en/github-actions, "Interactive and
+# automation modes").
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  dev-agent:
+    if: github.event.label.name == 'claude-dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read # Required for Claude to read CI results on the PR it opens
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code (developer agent, unattended)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          prompt: |
+            Implement GitHub issue #${{ github.event.issue.number }}
+            ("${{ github.event.issue.title }}") in this repository.
+
+            Follow the conventions in CLAUDE.md: work on a dedicated
+            feature branch (never commit directly to main), include tests
+            for the behavior you add, and run the build/tests/linters
+            locally before finishing.
+
+            Open a pull request whose title references issue
+            #${{ github.event.issue.number }} (e.g. include
+            "#${{ github.event.issue.number }}" in the title) -- this repo's
+            traceability CI check requires an FR-xxx or #N reference in the
+            PR title, and will fail the PR without it.
+
+            Do not merge the PR yourself. Merge is always a human action in
+            this repo, gated on CI passing and an independent review.
+
+          # --agent is a documented `claude` CLI flag (code.claude.com/docs/en/cli-reference),
+          # but whether it threads correctly through claude_args inside the
+          # GitHub Action's automation mode is not confirmed by the Action's
+          # own docs. Treat as unverified until observed working on the
+          # first real run -- check the run log actually reflects
+          # .claude/agents/developer.md's scope (feature branch, tests,
+          # PR-not-merge) rather than silently falling back to the default
+          # agent.
+          claude_args: "--agent developer"
+
+          # github_token is deliberately omitted. Leaving it unset makes
+          # the Action authenticate as the Claude GitHub App instead of the
+          # default GITHUB_TOKEN. GitHub does not trigger downstream
+          # workflows (CI, traceability) on commits pushed with the default
+          # GITHUB_TOKEN, and M5's CI gate depends on CI actually running
+          # on the resulting PR.
+
+      # No auto-merge step here, deliberately. The PR this produces sits
+      # exactly like every other PR in this repo: CI must pass, `reviewer`
+      # and `qa` still run as separate, manually-invoked sessions (not
+      # automated by M8), and a human merges. The point of M8 is proving
+      # unattended work clears the same gates, not skipping them.
