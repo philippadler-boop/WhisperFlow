@@ -1,0 +1,25 @@
+name: Traceability
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+    branches: [main]
+
+jobs:
+  traceability:
+    name: traceability
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an FR- ID or issue reference in the PR title or body
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | grep -Eiq '(FR-[0-9]{3,}|#[0-9]+)'; then
+            echo "Traceability reference found."
+          else
+            echo "::error::PR title/body must reference an FR-xxx requirement ID or a GitHub issue (#N)."
+            echo "This is a hard gate per constitution.md and decisions.md (decision 5) --"
+            echo "unattended agents (M8) won't self-police this link the way a human would."
+            exit 1
+          fi

@@ -1,0 +1,36 @@
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, independent of PR activity -- catches newly-disclosed
+    # vulnerability patterns in code that hasn't otherwise changed.
+    - cron: "19 3 * * 1"
+
+jobs:
+  codeql:
+    name: codeql
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check for Python source
+        id: check
+        run: |
+          if git ls-files '*.py' | grep -q .; then
+            echo "has_python=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_python=false" >> "$GITHUB_OUTPUT"
+            echo "No .py files tracked yet -- nothing for CodeQL to scan. This is expected before T001/T002 land."
+          fi
+      - uses: github/codeql-action/init@24ea975727876cf496b1eb0c5b36e96e01600b51 # v4.37.0
+        if: steps.check.outputs.has_python == 'true'
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@24ea975727876cf496b1eb0c5b36e96e01600b51 # v4.37.0
+        if: steps.check.outputs.has_python == 'true'
