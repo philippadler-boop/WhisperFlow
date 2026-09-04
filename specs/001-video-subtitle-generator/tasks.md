@@ -91,9 +91,10 @@ description: "Task list template for feature implementation"
 **Purpose**: Improvements that span both user stories
 
 - [ ] T024 [P] Document the `transcribe` command's usage (arguments, options, examples from contracts/cli.md) in `README.md`
-- [ ] T025 [P] Add a benchmark helper (`scripts/benchmark.py`) that times a `transcribe` run against a given video and prints elapsed time, to support later SC-002/SC-006 verification (quickstart.md Scenario 8) — this produces timing evidence for QA, it does not itself constitute the validation report (constitution Principle I: subagent separation — validation reports are `qa`-owned)
+- [ ] T025 [P] Add a benchmark helper (`scripts/benchmark.py`) that times a `transcribe` run against a given video and prints elapsed time (SC-002/SC-006, quickstart.md Scenario 8), and, given a small labeled reference corpus (sample videos + their known-correct transcript text), reports rough transcript-accuracy and subtitle-timing-sync percentages against that corpus. Note: SC-003 ("judged by a reviewing user") and SC-004 ("perceived by a viewer") are spec.md's own human-judgment criteria, not automatable pass/fail checks — this script gives `qa` a concrete number to anchor that judgment against, it does not replace it (Principle V, validation reports are `qa`-owned).
 - [ ] T026 [P] Integration test confirming no outbound network calls occur during `transcribe` (quickstart.md Scenario 7) in `tests/integration/test_no_network.py`
 - [ ] T027 [P] Lint/type-check cleanup pass across `src/` and `tests/` (`ruff check --fix`)
+- [ ] T028 If T025's benchmark shows the ~2x-real-time target (SC-002/SC-006) isn't met on reference hardware, either lower the default `--model` size in `contracts/cli.md`/`src/cli/main.py` or document minimum hardware requirements in `README.md` -- conditional on T025's actual measurement, not assumed necessary
 
 ---
 
@@ -119,7 +120,7 @@ description: "Task list template for feature implementation"
 - Foundational: T004, T005, T006, T007 touch different files and can run in parallel; T008 must follow T007
 - User Story 1: T009 and T010 can run in parallel (different files, no shared dependency); T015–T019 (all test files) can run in parallel once T009–T014 are done
 - User Story 2: T022 and T023 can run in parallel once T020–T021 are done
-- Polish: T024–T027 all touch different files and can run in parallel
+- Polish: T024, T026, T027 touch different files and can run in parallel with each other and with T025; T028 depends on T025's actual measurement (not parallel-safe with it) and is skipped entirely if T025 shows the target already met
 
 ---
 
@@ -162,7 +163,7 @@ Task: "Unit tests: audio module in tests/unit/test_audio.py"
 ## Notes
 
 - Per this project's constitution (Principle III), every PR implementing a task MUST reference its FR-xxx/issue ID — carry the IDs already annotated on each task above into the PR title/body.
-- Per Principle IV, each task (or small group of related tasks) is implemented on its own feature branch off `001-video-subtitle-generator`, never committed directly to `main`.
+- Per Principle IV, each task (or small group of related tasks) is implemented on its own feature branch cut directly from `main` (there is no separate `001-video-subtitle-generator` integration branch -- Specify/Plan/Tasks all committed straight to `main` since `.specify/extensions.yml` hooks aren't configured; see plan.md's Branch field), and PR'd back to `main`. Never committed directly to `main`.
 - Per Principle I, no task here includes writing `docs/validation/` reports — that is the `qa` subagent's independent responsibility once a PR is reviewed and approved.
 - [P] tasks touch different files with no unfinished-task dependency between them
 - Verify each user story's independent test (quickstart.md) passes before moving to the next story

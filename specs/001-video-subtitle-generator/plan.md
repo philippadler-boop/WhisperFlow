@@ -1,6 +1,6 @@
 # Implementation Plan: Video Subtitle Generator
 
-**Branch**: `001-video-subtitle-generator` | **Date**: 2026-09-04 | **Spec**: [spec.md](spec.md)
+**Branch**: `main` (no per-feature branch used -- `.specify/extensions.yml` hooks aren't configured, so Specify/Plan/Tasks all committed directly to `main`; see tasks.md Notes for the actual task-level branching model) | **Date**: 2026-09-04 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `/specs/001-video-subtitle-generator/spec.md`
 
@@ -91,16 +91,22 @@ specs/001-video-subtitle-generator/
 
 ```text
 src/
-├── cli/                 # Typer entrypoint: argument parsing, progress display (FR-005, FR-011)
+├── cli/                  # Typer entrypoint: argument parsing, progress display, --review flow (FR-005, FR-009, FR-010, FR-011)
 ├── audio/               # ffmpeg-based audio extraction/probing from the input video (FR-001)
 ├── transcription/       # faster-whisper wrapper producing a time-coded Transcript (FR-002, FR-004)
-├── subtitles/           # Transcript -> SubtitleFile composition (srt lib), review/edit support (FR-006, FR-009, FR-010)
-└── lib/                 # Shared types (Video, Transcript, SubtitleFile, etc.) and error/reporting helpers (FR-007, FR-008)
+├── subtitles/            # Transcript -> SubtitleFile composition and SubtitleLine/SubtitleFile models (srt lib) (FR-006)
+└── lib/                  # Shared error types (FR-007, FR-008) -- NOT a shared-entities module; Video/Transcript/
+                          #   SubtitleFile each live in their own pipeline-stage module (audio/, transcription/,
+                          #   subtitles/) per tasks.md
 
 tests/
 ├── contract/            # CLI argument/exit-code/output-format contract tests (see contracts/cli.md)
 ├── integration/         # End-to-end: sample video in -> .srt file out
-└── unit/                # Per-module unit tests (audio extraction, transcript segmentation, srt composition)
+├── unit/                 # Per-module unit tests (audio extraction, transcript segmentation, srt composition)
+└── fixtures/             # Shared sample videos (clear-speech, silent/no-speech) used by contract/integration tests
+
+scripts/
+└── benchmark.py          # Timing helper for SC-002/SC-006 verification (not part of the shipped CLI)
 ```
 
 **Structure Decision**: Single project (Option 1) — WhisperFlow is a
