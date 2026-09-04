@@ -21,7 +21,7 @@ Responsibilities:
 - Break the design into a task list: independently implementable,
   independently testable units of work, each one small enough for the
   Developer subagent to complete in a single feature branch. Each task must
-  reference the `REQ-xxx` ID(s) it satisfies — this is what later
+  reference the `FR-xxx` ID(s) it satisfies — this is what later
   traceability checks enforce, so don't leave it implicit.
 
 Hard rules:

@@ -13,7 +13,7 @@ Responsibilities:
 - Produce (or revise) a concept brief: problem, target users, success
   criteria, explicit non-goals.
 - Produce (or revise) a requirements spec: a numbered, testable list
-  (`REQ-001`, `REQ-002`, ...). Each requirement should be specific enough
+  (`FR-001`, `FR-002`, ...). Each requirement should be specific enough
   that the QA subagent could later check it against running software.
 - For anything smaller than a multi-week feature, collapse the concept
   brief and requirements spec into one lightweight document rather than

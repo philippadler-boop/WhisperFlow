@@ -23,6 +23,26 @@ Sync Impact Report
   constitution; content derived from CLAUDE.md, .claude/agents/*, and
   README.md is treated as authoritative source for these principles per
   the scope guard (no application files were touched).
+
+Sync Impact Report (amendment 2026-09-04)
+- Version change: 1.0.0 -> 1.0.1
+- Rationale: PATCH per the semver rule below -- wording correction, no
+  rule changed. Principle III referred to requirement IDs as `REQ-001`,
+  `REQ-002`, ... but Spec Kit's own spec-template.md (and therefore every
+  spec /speckit.specify produces, including specs/001-video-subtitle-generator)
+  hardcodes the `FR-` (Functional Requirement) prefix. Decided to adopt
+  Spec Kit's native convention rather than fight the tool on every future
+  spec; `implementation-plan.md`, `CLAUDE.md`, and the five `.claude/agents/*.md`
+  files in the sibling ai-dev-pipeline/WhisperFlow repos were updated to
+  match in the same pass.
+- Modified principles: III. Requirement Traceability (REQ- -> FR-, no
+  other change to the rule itself)
+- Added sections: none
+- Removed sections: none
+- Templates checked for alignment: no template edits needed -- this
+  amendment brings the constitution into alignment with the template's
+  existing FR- convention, not the other way around.
+- Deferred TODOs: none.
 -->
 
 # WhisperFlow Constitution
@@ -56,9 +76,9 @@ requirements, or shipping the wrong code — keeps a human in control
 without making them a bottleneck on everything in between.
 
 ### III. Requirement Traceability
-Requirements are written as a numbered, testable list (`REQ-001`,
-`REQ-002`, ...). Every task in the architect's breakdown MUST reference
-the `REQ-xxx` ID(s) it satisfies. Every PR MUST reference the `REQ-`/issue
+Requirements are written as a numbered, testable list (`FR-001`,
+`FR-002`, ...). Every task in the architect's breakdown MUST reference
+the `FR-xxx` ID(s) it satisfies. Every PR MUST reference the `FR-`/issue
 ID it implements, in its title or body. This is a hard rule starting with
 the first PR — it does not wait until a CI check exists to enforce it;
 once such a check exists, it becomes a required check, not a new
@@ -82,7 +102,7 @@ enforceable in practice rather than only in policy.
 ### V. Evidence-Based Validation
 `qa` confirms a requirement is satisfied by actually running the software
 (or the relevant build/test) and observing real output, mapping each
-`REQ-xxx` to the concrete evidence that closes it. A green CI run is not,
+`FR-xxx` to the concrete evidence that closes it. A green CI run is not,
 by itself, evidence that a requirement is met — it confirms tests passed,
 not that the right thing was built. Each validation report lives under
 `docs/validation/`, one per task/PR, structured as requirement → evidence
@@ -142,4 +162,4 @@ Every PR and every `reviewer` review MUST verify compliance with the
 principles above. Any deviation from a principle MUST be justified
 explicitly in the PR description, not introduced silently.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-03
+**Version**: 1.0.1 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-04

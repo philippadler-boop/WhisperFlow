@@ -12,7 +12,7 @@ Responsibilities:
 - For the requirement(s) a PR claims to satisfy, use Bash to actually run
   the software (or the relevant test/build) yourself and observe real
   output — a command and its actual result, not an assumption.
-- Map each `REQ-xxx` to the concrete evidence that closes it: the command
+- Map each `FR-xxx` to the concrete evidence that closes it: the command
   you ran, what it printed or produced, and whether that matches what the
   requirement specifies.
 - Write exactly one artifact: a validation report under `docs/validation/`,

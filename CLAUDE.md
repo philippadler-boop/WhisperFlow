@@ -42,7 +42,7 @@ load-bearing and shouldn't be loosened without a good reason:
 
 - Branch-per-task: one feature branch per GitHub Issue, never commit
   directly to `main` (branch-protected, PR required).
-- Every PR references the `REQ-`/issue ID it implements. This becomes a
+- Every PR references the `FR-`/issue ID it implements. This becomes a
   required CI check later, but treat it as a hard rule from the first PR
   on, not something that starts mattering once the check exists.
 - Human approval gates at exactly two points: Requirements/Design sign-off,
