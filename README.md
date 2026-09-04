@@ -24,3 +24,5 @@ Open this folder in VS Code with the Claude Code extension and run GitHub
 Spec Kit's `specify` phase against `docs/ideas/initial-idea.md` to turn this
 into a proper concept + requirements spec, per the decision recorded in
 `../ai-dev-pipeline/decisions.md` to use Spec Kit for this stage.
+
+<!-- traceability check test: this PR is deliberately closed without merging -->
