@@ -9,6 +9,13 @@ jobs:
   traceability:
     name: traceability
     runs-on: ubuntu-latest
+    # Dependabot's own PRs (dependency/Action version bumps) are automated
+    # maintenance, not agent- or human-authored feature work -- they don't
+    # map to a requirement, and Dependabot has no way to add one. Skipping
+    # this job for them is treated as a passing required check by GitHub
+    # (a skipped conclusion satisfies a required status check), so this
+    # doesn't weaken the gate for anyone who can actually add a reference.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
       - name: Require an FR- ID or issue reference in the PR title or body
         env:
