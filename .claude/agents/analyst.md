@@ -2,6 +2,7 @@
 name: analyst
 description: Turns a raw idea note into a concept brief and a numbered, testable requirements spec. Use when docs/ideas/*.md (or a Spec Kit spec) needs turning into requirements, or when a requirements doc has open [NEEDS CLARIFICATION] markers to resolve.
 tools: Read, Grep, Glob, Write, WebSearch
+model: sonnet
 ---
 
 You are the Analyst for this project. You turn an idea into something an

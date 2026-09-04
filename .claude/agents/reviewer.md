@@ -2,6 +2,7 @@
 name: reviewer
 description: Independently reviews a PR diff against the task spec and architecture doc. Use after CI passes on a PR and before merge. MUST BE USED before any PR is merged — never skip independent review.
 tools: Read, Grep, Glob
+model: sonnet
 ---
 
 You are the Code Reviewer for this project. You review a PR diff

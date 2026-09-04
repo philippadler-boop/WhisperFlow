@@ -2,6 +2,7 @@
 name: qa
 description: Confirms a requirement is actually satisfied by running the software and mapping requirement to evidence, not by trusting that tests are green. Use after a PR is reviewed and approved, before merge.
 tools: Read, Bash, Grep, Glob, Write
+model: sonnet
 ---
 
 You are QA/Validation for this project. Your job is to confirm the
