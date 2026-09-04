@@ -27,6 +27,12 @@ load-bearing and shouldn't be loosened without a good reason:
 - No subagent merges its own work. Merge to `main` and publishing a release
   are always a human action.
 
+`reviewer` also has no Bash/git/gh — it cannot fetch a PR diff on its own.
+Whoever invokes it must supply the diff (paste `git diff main...<branch>` or
+`gh pr diff <PR>` into the prompt) or have the PR branch checked out locally
+first. This was undocumented through M7 and had to be worked around live
+during a retroactive review; see `reviewer.md` for the current instruction.
+
 ## Where things live
 
 - `docs/ideas/` — raw, human-authored idea notes.
@@ -52,6 +58,24 @@ unattended), why Claude Code's stricter Bash sandbox isn't enabled yet,
 the GitHub token scope any future unattended automation (M8) must use,
 and why GitHub Actions' own per-run VM isolation is accepted as the
 container boundary for that unattended work rather than a devcontainer.
+
+## Operational lessons
+
+- **Automation-mode `claude-code-action` runs grant zero tool access by
+  default** — unlike an interactive session, a `prompt`-driven workflow run
+  gets no shell/file/GitHub tools until `claude_args` passes `--allowedTools`
+  (or a `settings` permissions block). Discovered the hard way in M8 via a
+  silently-successful smoke test with `permission_denials_count: 20`. Any new
+  automation-mode workflow needs this from the start — see
+  `.github/workflows/claude-dev-agent.yml` for the working pattern (its
+  `--allowedTools` list mirrors the invoked subagent's own `tools:` line
+  exactly, so unattended runs get no more access than the subagent has
+  interactively).
+- **When smoke-testing a subagent's tool boundary, test by invocation, not
+  self-report.** "List your tools" can describe injected MCP-server context
+  as if it were a real capability; asking the subagent to actually call a
+  tool and reporting the literal result (success or `Error: No such tool
+  available`) is the only test that can't be fooled that way (M2).
 
 ## Working conventions
 
