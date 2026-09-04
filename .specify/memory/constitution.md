@@ -63,6 +63,25 @@ Sync Impact Report (amendment 2026-09-04, same day)
 - Added sections: none
 - Removed sections: none
 - Deferred TODOs: none.
+
+Sync Impact Report (amendment 2026-09-04, third same-day amendment)
+- Version change: 1.1.0 -> 1.2.0
+- Rationale: MINOR -- materially expanded guidance in Principle IV, no
+  rule reversal. Root cause of the D1 CRITICAL /speckit.analyze finding:
+  this project never created a real feature branch for Spec Kit's planning
+  phases, so plan.md's templated Branch field and tasks.md's generated
+  branching notes both described a branch that didn't exist. Resolved by
+  deciding a real feature branch SHOULD have been created (not that the
+  branch model should be abandoned) -- both /speckit.plan and
+  /speckit.tasks load this file before writing branch-related text, so
+  fixing it here reaches every future feature.
+- Modified principles: IV. Branch-per-Task, Protected Main (adds the
+  Spec-Kit-planning-branch requirement and the one-time grandfathered
+  exception for the first feature; the core rule -- one branch per issue,
+  off main, protected main -- is unchanged)
+- Added sections: none
+- Removed sections: none
+- Deferred TODOs: none.
 -->
 
 # WhisperFlow Constitution
@@ -111,13 +130,36 @@ confirm a PR does what it claims rather than just that it looks
 plausible.
 
 ### IV. Branch-per-Task, Protected Main
-One feature branch per GitHub Issue. Nobody — human or subagent — commits
-directly to `main`; `main` is branch-protected and every change lands via
-PR.
+One feature branch per GitHub Issue, cut from `main`. Nobody — human or
+subagent — commits directly to `main`; `main` is branch-protected and
+every change lands via PR.
+
+**Spec Kit's planning phases also use a real feature branch, not `main`
+directly.** Before running `/speckit.specify`, create and check out a
+branch matching the feature directory name Spec Kit will use (e.g.
+`001-<slug>`); `/speckit.specify` through `/speckit.analyze` and
+`architect`'s ADRs all commit to that branch. It merges to `main` via PR
+once the plan is approved (Design Gate, Principle II) — that merge *is*
+the approval action, not a separate step after it. The only exceptions are
+Constitution itself (project-wide, not feature-specific, so it stays on
+`main`) and implementation-task branches, which are cut from `main` only
+after that merge.
+
+WhisperFlow's first feature (`video-subtitle-generator`) is a documented,
+one-time exception to this: its Specify/Clarify/Plan/Tasks/Analyze
+artifacts were committed directly to `main` because this branch
+requirement wasn't written down yet when that work happened
+(`.specify/extensions.yml` hooks were never configured, so nothing caught
+the omission automatically — see `/speckit.analyze` finding D1,
+2026-09-04, ai-dev-pipeline/decisions.md). Corrected here; applies to
+every feature from this point on.
 
 Rationale: keeps each unit of work independently reviewable and
 revertible, and is what makes the Merge/Release gate (Principle II)
-enforceable in practice rather than only in policy.
+enforceable in practice rather than only in policy. A feature-level branch
+for planning artifacts extends the same reasoning one gate earlier — the
+Design Gate approval should be a real, reviewable PR merge, not a verbal
+sign-off over content that was already sitting on `main` regardless.
 
 ### V. Evidence-Based Validation
 `qa` confirms a requirement is satisfied by actually running the software
@@ -190,4 +232,4 @@ Every PR and every `reviewer` review MUST verify compliance with the
 principles above. Any deviation from a principle MUST be justified
 explicitly in the PR description, not introduced silently.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-04
+**Version**: 1.2.0 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-04

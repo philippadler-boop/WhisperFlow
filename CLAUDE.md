@@ -45,8 +45,13 @@ load-bearing and shouldn't be loosened without a good reason:
 
 ## Working conventions
 
-- Branch-per-task: one feature branch per GitHub Issue, never commit
-  directly to `main` (branch-protected, PR required).
+- Branch-per-task: one feature branch per GitHub Issue, cut from `main`,
+  never commit directly to `main` (branch-protected, PR required). Spec
+  Kit's planning phases (`/speckit.specify` through `/speckit.analyze`,
+  plus `architect`'s ADRs) also use a real feature branch, merged to
+  `main` via PR at Design Gate approval -- not `main` directly. See
+  constitution.md Principle IV (video-subtitle-generator is a documented
+  one-time exception; every feature after it must have a branch).
 - Every PR references the `FR-`/issue ID it implements. This becomes a
   required CI check later, but treat it as a hard rule from the first PR
   on, not something that starts mattering once the check exists.
