@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Python dependencies declared in pyproject.toml, once T002 adds it.
+  # Safe to leave configured before then -- Dependabot simply finds
+  # nothing to update yet.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Keeps the pinned commit SHAs in .github/workflows/*.yml current --
+  # Dependabot updates both the SHA and its trailing "# vX.Y.Z" comment
+  # when a new release ships, so the pin-to-SHA requirement (Section 12)
+  # doesn't mean these silently go stale.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
