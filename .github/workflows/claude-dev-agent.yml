@@ -49,14 +49,14 @@ jobs:
             Do not merge the PR yourself. Merge is always a human action in
             this repo, gated on CI passing and an independent review.
 
-          # --agent is a documented `claude` CLI flag (code.claude.com/docs/en/cli-reference),
-          # but whether it threads correctly through claude_args inside the
-          # GitHub Action's automation mode is not confirmed by the Action's
-          # own docs. Treat as unverified until observed working on the
-          # first real run -- check the run log actually reflects
-          # .claude/agents/developer.md's scope (feature branch, tests,
-          # PR-not-merge) rather than silently falling back to the default
-          # agent.
+          # --agent is a documented `claude` CLI flag (code.claude.com/docs/en/cli-reference).
+          # Confirmed working through claude_args in the Action's automation
+          # mode: a second smoke-test run (throwaway issue #50, 2026-09-04,
+          # after the --allowedTools fix below) showed the session's own
+          # "init" event reporting "tools": ["Read","Edit","Write","Bash",
+          # "Grep","Glob"] -- exactly developer.md's declared tool list, not
+          # the full default Claude Code toolset -- so the agent config is
+          # genuinely loaded, not silently falling back to the default agent.
           #
           # --allowedTools is NOT optional here: per code.claude.com's own
           # docs, automation mode (a `prompt` input) gives Claude no
@@ -71,13 +71,13 @@ jobs:
           # grants no more than the subagent already has when run locally.
           claude_args: '--agent developer --allowedTools "Bash,Edit,Write,Read,Grep,Glob"'
 
-          # Temporary, for verification only: the Action hides the full
-          # conversation transcript by default ("full output hidden for
-          # security"), which is why the #48 smoke test could prove
-          # *something* was denied but not *what*. Keep this on until a
-          # real run is confirmed to actually load developer.md's rules
-          # (feature branch, tests, PR-not-merge), then reconsider whether
-          # to turn it back off.
+          # Kept on through the M8 pilot (T002): the Action hides the full
+          # conversation transcript by default, which is what made the #48
+          # smoke test's failure (permission_denials_count: 20) opaque until
+          # this was turned on for the #50 re-test. Worth keeping visible
+          # for the first real unattended PR too, so its run log is fully
+          # inspectable rather than trust-me-it-worked. Revisit turning it
+          # back off once M8 closes.
           show_full_output: true
 
           # github_token is deliberately omitted. Leaving it unset makes
