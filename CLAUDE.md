@@ -43,6 +43,16 @@ load-bearing and shouldn't be loosened without a good reason:
 - Review reports aren't files: the `reviewer` subagent returns its report
   as text, and whoever invoked it posts that as the actual PR review.
 
+## Security baseline
+
+See `SECURITY-NOTES.md` for the full picture: what's denied in
+`.claude/settings.json` (credential paths no session in this repo can
+read, regardless of platform or whether the session is interactive or
+unattended), why Claude Code's stricter Bash sandbox isn't enabled yet,
+the GitHub token scope any future unattended automation (M8) must use,
+and why GitHub Actions' own per-run VM isolation is accepted as the
+container boundary for that unattended work rather than a devcontainer.
+
 ## Working conventions
 
 - Branch-per-task: one feature branch per GitHub Issue, cut from `main`,
