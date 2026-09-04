@@ -43,6 +43,26 @@ Sync Impact Report (amendment 2026-09-04)
   amendment brings the constitution into alignment with the template's
   existing FR- convention, not the other way around.
 - Deferred TODOs: none.
+
+Sync Impact Report (amendment 2026-09-04, same day)
+- Version change: 1.0.1 -> 1.1.0
+- Rationale: MINOR -- materially changed guidance in Documentation &
+  Artifact Structure (a non-principle section). M4 as originally planned
+  (architect.md hand-writes docs/architecture.md + ADRs + manually
+  converts tasks to GitHub Issues) was found to conflict with decision 4
+  ("use GitHub Spec Kit as-is ... rather than hand-rolling an
+  equivalent") once the installed skill set was actually inspected: Spec
+  Kit already ships /speckit.plan, /speckit.tasks, and
+  /speckit.taskstoissues, covering exactly what M4 was about to
+  hand-roll. Corrected before M4 started, not after.
+- Modified principles: none (Core Principles I-V unchanged)
+- Modified sections: Documentation & Artifact Structure -- design
+  artifacts now come from Spec Kit's native Plan/Tasks chain under
+  `specs/<feature>/`, not a hand-authored `docs/architecture.md`. ADRs
+  retained under `docs/adr/` as a companion layer, not a replacement.
+- Added sections: none
+- Removed sections: none
+- Deferred TODOs: none.
 -->
 
 # WhisperFlow Constitution
@@ -117,14 +137,22 @@ the requirement describes.
 
 - `docs/ideas/` holds raw, human-authored idea notes — the starting point
   before any Spec Kit artifact exists.
-- Concept briefs and requirements specs are produced via GitHub Spec Kit,
-  following Spec Kit's own layout rather than a parallel one invented for
-  this repo.
-- `docs/architecture.md` is the architect-owned architecture doc, updated
-  in place as the design evolves.
+- Concept briefs, requirements specs, and technical design artifacts are
+  produced via GitHub Spec Kit's native chain — `/speckit.specify` ->
+  `/speckit.clarify` -> `/speckit.plan` -> `/speckit.tasks` ->
+  `/speckit.taskstoissues` -> `/speckit.implement` — landing under
+  `specs/<feature>/` (`spec.md`, `research.md`, `data-model.md`,
+  `contracts/`, `quickstart.md`, `plan.md`, `tasks.md`) per Spec Kit's own
+  layout, not a parallel structure invented for this repo (decision 4:
+  use Spec Kit as-is rather than hand-rolling an equivalent). There is no
+  separate hand-authored `docs/architecture.md` — `plan.md` and its
+  companion artifacts are the design record.
 - `docs/adr/` holds one Architecture Decision Record per non-trivial
-  architectural decision, each structured as **Context** / **Decision** /
-  **Alternatives Considered** / **Consequences**.
+  architectural decision surfaced during the Plan phase (transcription
+  engine, subtitle format, CLI framework, etc.), each structured as
+  **Context** / **Decision** / **Alternatives Considered** /
+  **Consequences** (decision 6). `architect` writes these as a companion
+  layer to `plan.md`, not as a replacement for it.
 - `docs/validation/` holds `qa`'s validation reports, one per task/PR
   (Principle V).
 - Review reports are not files: `reviewer` returns its report as text, and
@@ -162,4 +190,4 @@ Every PR and every `reviewer` review MUST verify compliance with the
 principles above. Any deviation from a principle MUST be justified
 explicitly in the PR description, not introduced silently.
 
-**Version**: 1.0.1 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-04
+**Version**: 1.1.0 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-04

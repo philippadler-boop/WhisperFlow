@@ -4,8 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-WhisperFlow — a tool that takes a video and generates subtitles in a chosen
-language. It's the pilot project for the AI dev pipeline described in
+WhisperFlow — a tool that takes a video and generates subtitles. v1 is
+transcription-only (captions in the video's own spoken language);
+translation into a chosen target language is deferred as a fast-follow
+(see `specs/001-video-subtitle-generator/spec.md`). It's the pilot project
+for the AI dev pipeline described in
 `../ai-dev-pipeline` (a separate, planning-only repo): the first project run
 end-to-end through that pipeline's lifecycle. This repo holds the actual
 project artifacts (specs, ADRs, code, `.claude/agents/`); the reasoning
@@ -27,12 +30,14 @@ load-bearing and shouldn't be loosened without a good reason:
 ## Where things live
 
 - `docs/ideas/` — raw, human-authored idea notes.
-- Concept brief + requirements spec — via GitHub Spec Kit once it's
-  installed; follow Spec Kit's own layout rather than inventing a parallel
-  one.
-- `docs/architecture.md` — architect-owned architecture doc.
-- `docs/adr/` — one ADR per non-trivial architectural decision, structured
-  as Context / Decision / Alternatives Considered / Consequences.
+- `specs/<feature>/` — GitHub Spec Kit's own layout: `spec.md`
+  (requirements), `research.md`/`data-model.md`/`contracts/`/`quickstart.md`
+  (`/speckit.plan` output), `tasks.md` (`/speckit.tasks` output). No
+  separate hand-authored architecture doc — `plan.md` and its companions
+  are the design record.
+- `docs/adr/` — one ADR per non-trivial architectural decision surfaced
+  during the Plan phase, structured as Context / Decision / Alternatives
+  Considered / Consequences. A companion to `plan.md`, not a replacement.
 - `docs/validation/` — qa-owned; one validation report per task/PR, mapping
   each requirement to the evidence that closes it.
 - Review reports aren't files: the `reviewer` subagent returns its report
