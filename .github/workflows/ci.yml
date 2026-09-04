@@ -52,8 +52,8 @@ jobs:
           fi
       - name: Run tests
         run: |
-          if [ -d tests ]; then
+          if find tests -name 'test_*.py' -o -name '*_test.py' 2>/dev/null | grep -q .; then
             pytest
           else
-            echo "No tests/ directory yet -- nothing to run. This is expected before T001 lands."
+            echo "No test files yet -- nothing to run. This is expected until this feature's test tasks land."
           fi
