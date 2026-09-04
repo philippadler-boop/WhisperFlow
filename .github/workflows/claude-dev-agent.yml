@@ -58,6 +58,19 @@ jobs:
           # the full default Claude Code toolset -- so the agent config is
           # genuinely loaded, not silently falling back to the default agent.
           #
+          # --model sonnet: belt-and-suspenders pin (issue #59). developer.md
+          # now carries its own `model: sonnet` frontmatter, which the
+          # resolution chain (per-invocation override -> agent frontmatter ->
+          # CLAUDE_CODE_SUBAGENT_MODEL -> main conversation's model) already
+          # honors on its own -- confirmed by invocation, not just by reading
+          # the YAML: `claude --agent developer` with no override reports
+          # "model": "claude-sonnet-5" in its init event, and overriding with
+          # `--model haiku` genuinely changes that to
+          # "claude-haiku-4-5-20251001", proving the field is read, not
+          # ignored. Pinning it here too means this workflow doesn't silently
+          # drift if developer.md's frontmatter is ever edited or removed
+          # without this file being touched in the same change.
+          #
           # --allowedTools is NOT optional here: per code.claude.com's own
           # docs, automation mode (a `prompt` input) gives Claude no
           # shell/GitHub tool access at all until granted explicitly via
@@ -69,7 +82,7 @@ jobs:
           # call the developer agent tried was silently denied. The list
           # below mirrors developer.md's own `tools:` line exactly, so this
           # grants no more than the subagent already has when run locally.
-          claude_args: '--agent developer --allowedTools "Bash,Edit,Write,Read,Grep,Glob"'
+          claude_args: '--agent developer --model sonnet --allowedTools "Bash,Edit,Write,Read,Grep,Glob"'
 
           # Kept on through the M8 pilot (T002): the Action hides the full
           # conversation transcript by default, which is what made the #48
