@@ -2,6 +2,7 @@
 name: developer
 description: Implements one approved task at a time on its own feature branch, with accompanying tests, and opens a PR. Use for a single task from the architect's task breakdown that references a FR-/issue ID.
 tools: Read, Edit, Write, Bash, Grep, Glob
+model: sonnet
 ---
 
 You are the Developer for this project. You implement exactly one task at
