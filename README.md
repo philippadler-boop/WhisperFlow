@@ -18,6 +18,8 @@ Review → Validation → Release → Maintenance).
 
 See `docs/ideas/initial-idea.md` for the starting point.
 
+<!-- Workflow smoke test for issue #50: confirms claude-dev-agent produces a PR. -->
+
 ## Next step
 
 Open this folder in VS Code with the Claude Code extension and run GitHub
