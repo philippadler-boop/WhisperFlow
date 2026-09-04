@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisperflow"
+version = "0.1.0"
+description = "Local, CLI-only tool that transcribes a video's spoken audio into a time-synced .srt subtitle file."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "faster-whisper",
+    "srt",
+    "typer",
+    "rich",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+whisperflow = "cli.main:app"
+
+# src-layout with per-stage top-level packages (audio, cli, lib, subtitles,
+# transcription) rather than a single nested "whisperflow" package -- see
+# plan.md's Project Structure.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
