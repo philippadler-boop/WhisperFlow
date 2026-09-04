@@ -2,6 +2,18 @@
   "permissions": {
     "allow": [
       "Edit(docs/adr/*.md)"
+    ],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.netrc)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.npmrc)",
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/.env.*)"
     ]
   }
 }
