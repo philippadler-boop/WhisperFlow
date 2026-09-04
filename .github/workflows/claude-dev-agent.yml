@@ -57,7 +57,28 @@ jobs:
           # .claude/agents/developer.md's scope (feature branch, tests,
           # PR-not-merge) rather than silently falling back to the default
           # agent.
-          claude_args: "--agent developer"
+          #
+          # --allowedTools is NOT optional here: per code.claude.com's own
+          # docs, automation mode (a `prompt` input) gives Claude no
+          # shell/GitHub tool access at all until granted explicitly via
+          # --allowedTools or a `settings` permissions.allow rule. A first
+          # smoke-test run (throwaway issue #48, 2026-09-04) confirmed this
+          # the hard way: it completed with exit success and zero errors,
+          # but produced no branch/commit/PR/comment and
+          # permission_denials_count: 20 in the result JSON -- every tool
+          # call the developer agent tried was silently denied. The list
+          # below mirrors developer.md's own `tools:` line exactly, so this
+          # grants no more than the subagent already has when run locally.
+          claude_args: '--agent developer --allowedTools "Bash,Edit,Write,Read,Grep,Glob"'
+
+          # Temporary, for verification only: the Action hides the full
+          # conversation transcript by default ("full output hidden for
+          # security"), which is why the #48 smoke test could prove
+          # *something* was denied but not *what*. Keep this on until a
+          # real run is confirmed to actually load developer.md's rules
+          # (feature branch, tests, PR-not-merge), then reconsider whether
+          # to turn it back off.
+          show_full_output: true
 
           # github_token is deliberately omitted. Leaving it unset makes
           # the Action authenticate as the Claude GitHub App instead of the
