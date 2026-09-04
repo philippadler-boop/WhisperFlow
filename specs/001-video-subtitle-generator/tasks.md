@@ -25,7 +25,7 @@ description: "Task list template for feature implementation"
 
 - [x] T001 Create project structure per plan.md: `src/cli/`, `src/audio/`, `src/transcription/`, `src/subtitles/`, `src/lib/`, `tests/contract/`, `tests/integration/`, `tests/unit/`, `tests/fixtures/`, `scripts/` (each `src/`/`tests/` subdirectory with `__init__.py`)
 - [x] T002 Initialize `pyproject.toml` at repo root: project metadata, Python 3.11+ requirement, runtime dependencies (`faster-whisper`, `srt`, `typer`, `rich`), dev dependency (`pytest`), `ruff` lint config, and `pytest` config (testpaths) — per plan.md Technical Context and research.md
-- [ ] T003 [P] Add `tests/conftest.py` with shared fixtures (a `typer.testing.CliRunner` fixture, and paths to small fixture videos under `tests/fixtures/` — a clear-speech clip and a silent/no-speech clip, per quickstart.md)
+- [x] T003 [P] Add `tests/conftest.py` with shared fixtures (a `typer.testing.CliRunner` fixture, and paths to small fixture videos under `tests/fixtures/` — a clear-speech clip and a silent/no-speech clip, per quickstart.md)
 
 ---
 
