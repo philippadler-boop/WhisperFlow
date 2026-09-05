@@ -89,5 +89,18 @@ container boundary for that unattended work rather than a devcontainer.
 - Every PR references the `FR-`/issue ID it implements. This becomes a
   required CI check later, but treat it as a hard rule from the first PR
   on, not something that starts mattering once the check exists.
+- Every PR **body** must additionally contain a literal, correctly-formed
+  GitHub closing-keyword line -- `Closes #N` or `Fixes #N` (or any of
+  GitHub's other recognized keywords: `close`, `closed`, `fix`, `fixed`,
+  `resolve`, `resolves`, `resolved`), with the keyword immediately followed
+  by `#N` and no other words in between. A title-only reference is not
+  enough: `traceability.yml` only checks the title (see that workflow's own
+  comment for why), and GitHub only auto-closes an issue from keywords it
+  finds in the PR body or a commit message, never the title. This bug class
+  bit three PRs in a row (#1, #5, #8 -- see #74): "closes issue #1" (wrong
+  phrasing, word between keyword and `#N`), "Refs #5" (not a recognized
+  keyword), and a title-only reference with no body mention at all. All
+  three passed every existing gate and merged cleanly, but left their issue
+  open. A non-blocking CI check for this is tracked separately (#75).
 - Human approval gates at exactly two points: Requirements/Design sign-off,
   and Merge/Release. Everything else proceeds without blocking.

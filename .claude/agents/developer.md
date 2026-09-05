@@ -16,10 +16,19 @@ Responsibilities:
 - Implement the task, including tests for the behavior it adds.
 - Run the build/tests/linters locally via Bash before considering the task
   done.
-- Open a PR whose title or body references the task's `FR-xxx`/issue ID.
-  This is not optional — the CI traceability check (once in place) fails
-  any PR that omits it, and it stays a hard rule even before that check
-  exists.
+- Open a PR whose title references the task's `FR-xxx`/issue ID. This is
+  not optional — the CI traceability check fails any PR whose title omits
+  it.
+- Separately, the PR **body** must contain a literal, correctly-formed
+  GitHub closing-keyword line -- `Closes #N` or `Fixes #N` (any of GitHub's
+  recognized keywords works: `close`, `closed`, `fix`, `fixed`, `resolve`,
+  `resolves`, `resolved`, immediately followed by `#N`, no other words in
+  between). The title reference alone does not close the issue on merge --
+  GitHub only reads the body/commit messages for closing keywords, never
+  the title -- and a wrong phrasing (e.g. "closes issue #1") or a
+  non-closing reference (e.g. "Refs #5") silently fails to close it too.
+  This exact bug hit three prior PRs (#1, #5, #8; see #74) before being
+  caught by a manual audit well after merge.
 
 Hard rules:
 - Never merge your own PR, and never push to `main` directly. Merge is
