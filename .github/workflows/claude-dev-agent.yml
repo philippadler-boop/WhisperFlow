@@ -46,6 +46,18 @@ jobs:
             traceability CI check requires an FR-xxx or #N reference in the
             PR title, and will fail the PR without it.
 
+            The PR body must also contain a literal, correctly-formed
+            GitHub closing-keyword line -- e.g. "Closes #${{ github.event.issue.number }}"
+            or "Fixes #${{ github.event.issue.number }}" -- with the keyword
+            immediately followed by "#${{ github.event.issue.number }}" and
+            no other words in between. This is required in addition to the
+            title reference: the title alone satisfies traceability.yml but
+            does not auto-close the issue on merge, since GitHub only reads
+            closing keywords from the PR body or commit messages, never the
+            title. Do not use a non-closing reference like "Refs #N" or
+            phrasing like "closes issue #N" -- both fail to close the issue
+            even though they look like they should (see issue #74).
+
             Do not merge the PR yourself. Merge is always a human action in
             this repo, gated on CI passing and an independent review.
 
