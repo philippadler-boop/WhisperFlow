@@ -127,7 +127,11 @@ def transcribe_audio(
         raise TranscriptionError(audio_track.extracted_path, reason=str(exc)) from exc
 
     segments: list[TranscriptSegment] = []
-    raw_iterator = iter(raw_segments)
+    try:
+        raw_iterator = iter(raw_segments)
+    except Exception as exc:
+        raise TranscriptionError(audio_track.extracted_path, reason=str(exc)) from exc
+
     while True:
         try:
             raw_segment = next(raw_iterator)

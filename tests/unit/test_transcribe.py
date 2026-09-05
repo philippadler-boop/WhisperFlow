@@ -192,6 +192,22 @@ class TestTranscribeAudioMocked:
 
         assert "stream cut off" in str(exc_info.value)
 
+    def test_iterator_creation_failure_raises_transcription_error(self, tmp_path: Path):
+        track = _audio_track(tmp_path)
+
+        class _BrokenIterable:
+            def __iter__(self):
+                raise RuntimeError("iterator setup failed")
+
+        class _BrokenIteratorModel:
+            def transcribe(self, audio: str):
+                return _BrokenIterable(), _FakeInfo()
+
+        with pytest.raises(TranscriptionError) as exc_info:
+            transcribe_audio(track, model=_BrokenIteratorModel())
+
+        assert "iterator setup failed" in str(exc_info.value)
+
     def test_on_segment_callback_failure_propagates_unwrapped(self, tmp_path: Path):
         # `on_segment` is caller-supplied (T013's own progress-reporting
         # code, not part of faster-whisper) -- a bug there must not be
