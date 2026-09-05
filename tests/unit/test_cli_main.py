@@ -46,16 +46,6 @@ def test_video_path_argument_is_required(cli_runner: CliRunner) -> None:
     assert "Missing argument" in result.output or "Error" in result.output
 
 
-@pytest.fixture
-def captured_pipeline_call(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Stub `_run_pipeline` and capture the kwargs it was called with."""
-    import cli.main as main_module
-
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(main_module, "_run_pipeline", lambda **kwargs: captured.update(kwargs))
-    return captured
-
-
 def test_default_model_is_base(
     cli_runner: CliRunner, captured_pipeline_call: dict[str, Any]
 ) -> None:
