@@ -83,13 +83,28 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
         AudioExtractionError: `ffmpeg` ran but exited non-zero (e.g. a
             corrupt stream, or a video with no audio stream to extract),
             or exited zero without actually writing a non-empty output
-            file.
+            file. This also covers a caller-supplied `output_path` that
+            already existed (with content) before the call and that
+            `ffmpeg` left untouched -- an existence/size check alone can't
+            tell that apart from a genuine write, so the pre-call state of
+            that path is snapshotted below and compared afterwards.
     """
     if shutil.which(FFMPEG_EXECUTABLE) is None:
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE)
 
     owns_output_file = output_path is None
     resolved_output = _new_temp_wav_path() if owns_output_file else Path(output_path)
+
+    # Snapshot the output path's state *before* invoking ffmpeg. For an
+    # owned (auto-generated) path this is always "exists, empty" --
+    # `_new_temp_wav_path()` just created it via `mkstemp`. For a
+    # caller-supplied path it may already exist with real content (the
+    # caller reusing a path across calls, say), which is exactly the case
+    # an exists()/size-only check after the fact can't distinguish from a
+    # genuine ffmpeg write -- ffmpeg exiting 0 without touching a
+    # pre-existing non-empty file would otherwise look identical to
+    # success.
+    pre_run_stat = resolved_output.stat() if resolved_output.exists() else None
 
     try:
         result = subprocess.run(
@@ -125,7 +140,9 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
         _cleanup_owned_file(resolved_output, owns_output_file)
         raise AudioExtractionError(video.path, stderr=result.stderr)
 
-    if not resolved_output.exists() or resolved_output.stat().st_size == 0:
+    post_run_stat = resolved_output.stat() if resolved_output.exists() else None
+
+    if post_run_stat is None or post_run_stat.st_size == 0:
         # Belt-and-braces: ffmpeg exited 0 but didn't actually write (a
         # non-empty) output file. Fail clearly here rather than returning
         # an AudioTrack pointing at a missing/stale file and pushing a
@@ -136,10 +153,46 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
             stderr="ffmpeg exited successfully but produced no output audio file",
         )
 
+    if _looks_unmodified(pre_run_stat, post_run_stat):
+        # ffmpeg exited 0 and *a* non-empty file sits at resolved_output --
+        # but it's the same file (same size, same mtime) that was already
+        # there before this call ran. That only happens for a
+        # caller-supplied output_path pointing at a pre-existing,
+        # non-empty file: an auto-generated path always starts out empty
+        # (mkstemp), so any non-empty result there necessarily means
+        # ffmpeg wrote it. Don't return an AudioTrack pointing at stale
+        # bytes ffmpeg never touched.
+        _cleanup_owned_file(resolved_output, owns_output_file)
+        raise AudioExtractionError(
+            video.path,
+            stderr=(
+                "ffmpeg exited successfully but did not modify the "
+                "pre-existing output file"
+            ),
+        )
+
     return AudioTrack(
         source_video=video,
         extracted_path=resolved_output,
         sample_rate_hz=SAMPLE_RATE_HZ,
+    )
+
+
+def _looks_unmodified(pre_run_stat: os.stat_result | None, post_run_stat: os.stat_result) -> bool:
+    """Whether `post_run_stat` shows no evidence ffmpeg actually wrote the file.
+
+    Only meaningful when the path already existed (with content) before
+    ffmpeg ran: `pre_run_stat` is `None` for a path that didn't exist yet,
+    which is never "unmodified" -- any file appearing there is new.
+    Compares both size and mtime (not size alone) since an ffmpeg run
+    that rewrites a file with content of the same length would otherwise
+    look untouched.
+    """
+    if pre_run_stat is None or pre_run_stat.st_size == 0:
+        return False
+    return (
+        post_run_stat.st_size == pre_run_stat.st_size
+        and post_run_stat.st_mtime_ns == pre_run_stat.st_mtime_ns
     )
 
 

@@ -280,6 +280,31 @@ class TestExtractAudioMocked:
         assert created_paths, "ffmpeg mock was never invoked"
         assert not created_paths[0].exists()
 
+    def test_ffmpeg_success_leaving_preexisting_output_untouched_raises_extraction_error(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # Residual gap found during PR #85 validation: a caller-supplied
+        # output_path that already exists with non-empty content, where
+        # ffmpeg exits 0 without actually touching it, must still raise --
+        # not silently return an AudioTrack pointing at the stale bytes.
+        # The exists()/non-empty check alone can't catch this because the
+        # pre-existing file already satisfies both conditions before
+        # ffmpeg ever runs.
+        video = _video(tmp_path)
+        desired_output = tmp_path / "audio.wav"
+        original_content = b"PRE-EXISTING-AUDIO-BYTES"
+        desired_output.write_bytes(original_content)
+
+        monkeypatch.setattr(subprocess, "run", _fake_ffmpeg_run(returncode=0, write_output=False))
+
+        with pytest.raises(AudioExtractionError):
+            extract_audio(video, output_path=desired_output)
+
+        # A caller-supplied path is the caller's own file to manage --
+        # raising an error must not delete or modify it.
+        assert desired_output.exists()
+        assert desired_output.read_bytes() == original_content
+
     def test_no_audio_track_video_surfaces_as_extraction_error(
         self, monkeypatch, tmp_path: Path
     ):
