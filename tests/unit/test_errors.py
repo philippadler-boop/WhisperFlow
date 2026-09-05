@@ -19,6 +19,8 @@ from lib.errors import (
     AudioExtractionError,
     FfmpegNotFoundError,
     MaxDurationExceededError,
+    ModelLoadError,
+    TranscriptionError,
     UnsupportedVideoFormatError,
     WhisperFlowError,
 )
@@ -171,12 +173,57 @@ class TestFfmpegNotFoundError:
             raise FfmpegNotFoundError()
 
 
+class TestModelLoadError:
+    def test_is_a_whisperflow_error(self):
+        assert issubclass(ModelLoadError, WhisperFlowError)
+
+    def test_message_mentions_model_size(self):
+        err = ModelLoadError("medium")
+        assert "medium" in str(err)
+        assert err.model_size == "medium"
+
+    def test_message_includes_reason_when_given(self):
+        err = ModelLoadError("small", reason="corrupt cache")
+        assert "corrupt cache" in str(err)
+        assert err.reason == "corrupt cache"
+
+    def test_message_omits_reason_when_not_given(self):
+        err = ModelLoadError("tiny")
+        assert err.reason == ""
+        assert str(err) == "failed to load ASR model 'tiny'"
+
+    def test_raisable_and_catchable(self):
+        with pytest.raises(ModelLoadError):
+            raise ModelLoadError("base", reason="boom")
+
+
+class TestTranscriptionError:
+    def test_is_a_whisperflow_error(self):
+        assert issubclass(TranscriptionError, WhisperFlowError)
+
+    def test_message_mentions_path(self):
+        err = TranscriptionError("audio.wav")
+        assert "audio.wav" in str(err)
+        assert err.path == Path("audio.wav")
+
+    def test_message_includes_reason_when_given(self):
+        err = TranscriptionError("audio.wav", reason="decoder exploded")
+        assert "decoder exploded" in str(err)
+        assert err.reason == "decoder exploded"
+
+    def test_raisable_and_catchable(self):
+        with pytest.raises(TranscriptionError):
+            raise TranscriptionError("audio.wav", reason="boom")
+
+
 def test_all_domain_errors_are_catchable_via_common_base():
     errors = [
         UnsupportedVideoFormatError("clip.avi", detected_format="avi"),
         MaxDurationExceededError(duration_seconds=10000.0),
         FfmpegNotFoundError(),
         AudioExtractionError("clip.mp4", stderr="boom"),
+        ModelLoadError("base", reason="boom"),
+        TranscriptionError("audio.wav", reason="boom"),
     ]
     for error in errors:
         with pytest.raises(WhisperFlowError):

@@ -2,12 +2,13 @@
 
 FR-007 requires the system to "clearly report an error, rather than
 silently failing" for an unsupported input format or an over-length video;
-contracts/cli.md additionally requires a missing `ffmpeg` binary to be
-reported the same way (exit code 1, a single human-readable line on
-stderr). These three exception types are the shared vocabulary later
-tasks (T009 video probing, T010 audio extraction, T014 CLI wiring) raise
-and catch so that expected, user-facing failures are handled uniformly and
-distinctly from unexpected bugs.
+contracts/cli.md additionally requires a missing `ffmpeg` binary, and a
+failure to load the ASR model, to be reported the same way (exit code 1, a
+single human-readable line on stderr). These exception types are the
+shared vocabulary later tasks (T009 video probing, T010 audio extraction,
+T011 transcription, T014 CLI wiring) raise and catch so that expected,
+user-facing failures are handled uniformly and distinctly from unexpected
+bugs.
 
 Each type's `str(err)` is a complete, human-readable message suitable for
 printing directly as `Error: {err}` -- callers should not need to build
@@ -176,4 +177,44 @@ class FfmpegNotFoundError(WhisperFlowError):
             f"required '{executable}' binary was not found on PATH "
             "(install ffmpeg and ensure it is on PATH)"
         )
+        super().__init__(message)
+
+
+class ModelLoadError(WhisperFlowError):
+    """The `faster-whisper` ASR model failed to load (T011).
+
+    Raised by transcription (`src/transcription/transcribe.py`) when
+    constructing the underlying `faster_whisper.WhisperModel` raises --
+    e.g. an unsupported/unknown model size, a corrupt or incomplete local
+    model cache, or (on a machine's first run) a failure to download the
+    model weights. Maps to contracts/cli.md's exit code 1 "the ASR model
+    failed to load" case, distinct from `AudioExtractionError` (extraction
+    itself, before the model is ever touched) and from `TranscriptionError`
+    (the model loaded fine but decoding failed partway through).
+    """
+
+    def __init__(self, model_size: str, reason: str = "") -> None:
+        self.model_size = model_size
+        self.reason = reason.strip()
+        detail = f": {self.reason}" if self.reason else ""
+        message = f"failed to load ASR model '{model_size}'{detail}"
+        super().__init__(message)
+
+
+class TranscriptionError(WhisperFlowError):
+    """`faster-whisper` failed to transcribe an already-extracted audio track (T011).
+
+    Raised by transcription when the model loaded successfully (see
+    `ModelLoadError`) but decoding the audio itself raises -- e.g. a
+    corrupt/unreadable WAV file, or an internal `faster-whisper`/CTranslate2
+    failure partway through decoding. Never a raw exception from the
+    underlying library -- callers can rely on catching `WhisperFlowError`
+    (or this type specifically) for every transcription-time failure.
+    """
+
+    def __init__(self, path: str | Path, reason: str = "") -> None:
+        self.path = Path(path)
+        self.reason = reason.strip()
+        detail = f": {self.reason}" if self.reason else ""
+        message = f"failed to transcribe audio from '{self.path}'{detail}"
         super().__init__(message)
