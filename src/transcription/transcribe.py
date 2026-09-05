@@ -127,23 +127,36 @@ def transcribe_audio(
         raise TranscriptionError(audio_track.extracted_path, reason=str(exc)) from exc
 
     segments: list[TranscriptSegment] = []
-    try:
-        for raw_segment in raw_segments:
+    raw_iterator = iter(raw_segments)
+    while True:
+        try:
+            raw_segment = next(raw_iterator)
+        except StopIteration:
+            break
+        except Exception as exc:
+            # A generator failing partway through iteration (e.g. an
+            # internal CTranslate2 decoding error) is just as much a
+            # transcription failure as engine.transcribe() itself raising
+            # synchronously above -- must not leak a raw exception from the
+            # underlying library either.
+            raise TranscriptionError(audio_track.extracted_path, reason=str(exc)) from exc
+
+        try:
             segment = TranscriptSegment(
                 start_seconds=raw_segment.start,
                 end_seconds=raw_segment.end,
                 text=raw_segment.text.strip(),
             )
             segments.append(segment)
-            if on_segment is not None:
-                on_segment(segment)
-    except Exception as exc:
-        # A generator failing partway through iteration (e.g. an internal
-        # CTranslate2 decoding error) is just as much a transcription
-        # failure as engine.transcribe() itself raising synchronously
-        # above -- must not leak a raw exception from the underlying
-        # library either.
-        raise TranscriptionError(audio_track.extracted_path, reason=str(exc)) from exc
+        except Exception as exc:
+            raise TranscriptionError(audio_track.extracted_path, reason=str(exc)) from exc
+
+        # `on_segment` is caller-supplied (T013's own progress-reporting
+        # code, not part of faster-whisper) -- a bug in it is not a
+        # transcription failure and must propagate un-wrapped, not be
+        # misattributed to the ASR engine via TranscriptionError.
+        if on_segment is not None:
+            on_segment(segment)
 
     return Transcript(
         source_video=audio_track.source_video,

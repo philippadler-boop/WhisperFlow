@@ -192,14 +192,17 @@ class TestTranscribeAudioMocked:
 
         assert "stream cut off" in str(exc_info.value)
 
-    def test_on_segment_callback_failing_mid_iteration_still_wrapped(self, tmp_path: Path):
+    def test_on_segment_callback_failure_propagates_unwrapped(self, tmp_path: Path):
+        # `on_segment` is caller-supplied (T013's own progress-reporting
+        # code, not part of faster-whisper) -- a bug there must not be
+        # misattributed to the ASR engine as a TranscriptionError.
         track = _audio_track(tmp_path)
         fake_model = _FakeModel([_FakeSegment(0.0, 1.0, "hello")])
 
         def _bad_callback(segment: TranscriptSegment) -> None:
             raise ValueError("callback bug")
 
-        with pytest.raises(TranscriptionError):
+        with pytest.raises(ValueError, match="callback bug"):
             transcribe_audio(track, model=fake_model, on_segment=_bad_callback)
 
     def test_injected_model_bypasses_whispermodel_construction(
