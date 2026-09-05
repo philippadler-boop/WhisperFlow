@@ -105,7 +105,7 @@ def transcribe(
         "--model",
         case_sensitive=False,
         help=(
-            "faster-whisper model size -- smaller is faster, "
+            "faster-whisper model size — smaller is faster, "
             "larger is more accurate (research.md)."
         ),
     ),
@@ -113,10 +113,10 @@ def transcribe(
         True,
         "--review/--no-review",
         help=(
-            "With --review (default), after generating a draft .srt the "
+            "With --review, after generating a draft .srt the "
             "command opens it in $EDITOR (or --editor) and waits for "
             "confirmation before finalizing (FR-009, FR-010, User Story 2). "
-            "--no-review finalizes immediately, for scripting/automation."
+            "--no-review finalizes immediately — for scripting/automation."
         ),
     ),
     editor: str | None = typer.Option(

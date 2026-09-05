@@ -140,7 +140,7 @@ def test_help_documents_model_option_choices_and_default(cli_runner: CliRunner) 
     assert "--model" in output
     assert "<tiny|base|small|medium|large>" in output
     assert (
-        "faster-whisper model size -- smaller is faster, larger is more accurate "
+        "faster-whisper model size — smaller is faster, larger is more accurate "
         "(research.md)." in output
     )
     assert "[default: base]" in output
@@ -177,11 +177,11 @@ def test_help_documents_review_option_and_default(cli_runner: CliRunner) -> None
     assert "--review" in output
     assert "--no-review" in output
     assert (
-        "With --review (default), after generating a draft .srt the command "
+        "With --review, after generating a draft .srt the command "
         "opens it in $EDITOR (or --editor) and waits for confirmation before "
         "finalizing (FR-009, FR-010, User Story 2)." in output
     )
-    assert "--no-review finalizes immediately, for scripting/automation." in output
+    assert "--no-review finalizes immediately — for scripting/automation." in output
     assert "[default: review]" in output
 
 
