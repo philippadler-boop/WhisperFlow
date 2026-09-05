@@ -1,18 +1,57 @@
 name: Claude Dev Agent
 
 # M8 (unattended work): separate from claude.yml on purpose. claude.yml
-# stays the interactive @claude-mention workflow; this one picks up an
-# issue with no human in the loop once it's labeled `claude-dev`, and runs
-# in automation mode (a `prompt` input, so Claude doesn't wait for a
-# mention -- see code.claude.com/docs/en/github-actions, "Interactive and
-# automation modes").
+# stays the interactive @claude-mention workflow; this one runs in
+# automation mode (a `prompt` input, so Claude doesn't wait for a mention
+# -- see code.claude.com/docs/en/github-actions, "Interactive and
+# automation modes") for two distinct triggers:
+#
+#   1. issues/labeled (claude-dev label) -- pick up a fresh task and open
+#      a new PR. Original M8 behavior, unchanged.
+#   2. pull_request_review/submitted (state: changes_requested) -- NEW.
+#      A reviewer requested changes on an existing PR; check out that
+#      PR's own branch and push a fix commit there, instead of opening a
+#      new PR. `reviewer` itself is still a manually-invoked local
+#      session (per the M8 scope decision -- see CLAUDE.md's Subagents
+#      section), so this does not create a fully closed, unsupervised
+#      review loop: a human still has to run `reviewer` and choose to
+#      post each request-changes review. The round cap below (env
+#      MAX_AUTO_FIX_ROUNDS) is a cheap safety net for that path anyway,
+#      not a fix for a loop that doesn't structurally exist yet -- it
+#      guards against the case where request-changes reviews get posted
+#      faster than a human is actually watching (e.g. a scripted/piped
+#      reviewer invocation, as this repo has started doing).
+#
+# UNVERIFIED as of this draft, same as every genuinely new mechanism in
+# this file has been treated before being trusted (--agent, --allowedTools,
+# --model all needed a real throwaway-issue run to confirm): the
+# `pull_request_review.review.state` string casing ("changes_requested",
+# lowercase -- GitHub's webhook payload docs say lowercase, but this repo
+# hasn't observed it directly), the round-count `gh api`/jq query, and the
+# multi-line GITHUB_OUTPUT prompt-building step. Smoke-test all of this
+# with a throwaway PR + a real `gh pr review --request-changes` before
+# trusting it on real work, same discipline as every prior change here.
 on:
   issues:
     types: [labeled]
+  pull_request_review:
+    types: [submitted]
+
+env:
+  # Safety net for the pull_request_review path only (see the "Count
+  # prior request-changes rounds" and "Stop and hand back" steps below).
+  # Once this many CHANGES_REQUESTED reviews have accumulated on a PR,
+  # claude-dev-agent stops auto-fixing and posts a comment instead of
+  # dispatching another round -- a human needs to look at it directly, or
+  # re-invoke `developer` manually to keep going deliberately. Tune
+  # freely; nothing else in this file depends on the specific number.
+  MAX_AUTO_FIX_ROUNDS: 3
 
 jobs:
   dev-agent:
-    if: github.event.label.name == 'claude-dev'
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'claude-dev') ||
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,40 +65,159 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Always runs (both paths), always produces a valid integer output.
+      # Deliberately NOT conditioned on event type: an unconditional step
+      # with a safe count=0 default on the issues/labeled path means every
+      # later comparison against this output is well-defined regardless of
+      # which trigger fired, rather than depending on GitHub Actions'
+      # &&/|| short-circuit behavior to avoid comparing against an empty
+      # string (that behavior isn't something this repo has verified and
+      # isn't worth relying on here when a plain shell default is simpler
+      # and unambiguous).
+      - name: Count prior request-changes rounds
+        id: round_count
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request_review" ]; then
+            count=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+              --jq '[.[] | select(.state == "CHANGES_REQUESTED")] | length')
+          else
+            count=0
+          fi
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Prior CHANGES_REQUESTED reviews on this PR: $count (cap: $MAX_AUTO_FIX_ROUNDS)"
+
+      # Only fires on the review path, and only once the cap is reached.
+      # Posts via the default token (a plain API comment, not a git push,
+      # so this doesn't touch the "commits must trigger CI" concern that
+      # governs the github_token omission further down).
+      - name: Stop and hand back to a human if the round cap is reached
+        if: >-
+          github.event_name == 'pull_request_review' &&
+          steps.round_count.outputs.count >= env.MAX_AUTO_FIX_ROUNDS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ROUND_COUNT: ${{ steps.round_count.outputs.count }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(cat <<EOF
+          Auto-fix round cap ($ROUND_COUNT/$MAX_AUTO_FIX_ROUNDS CHANGES_REQUESTED reviews) reached on this PR -- claude-dev-agent is stopping here rather than dispatching another automatic fix. A human should look at the remaining review feedback directly, or re-invoke \`developer\` manually to continue deliberately.
+          EOF
+          )"
+          echo "::notice::Round cap reached ($ROUND_COUNT/$MAX_AUTO_FIX_ROUNDS) -- skipping the Claude Code step."
+
+      # Builds the prompt for whichever trigger fired, since the two paths
+      # need genuinely different instructions (open a new PR vs. push a
+      # fix to an existing one) and GitHub Actions expressions can't
+      # cleanly hold a multi-line ternary. Skips (leaving `prompt` unset)
+      # once the round cap is reached, which the next step keys off of to
+      # skip Claude entirely rather than run it with an empty prompt.
+      #
+      # SECURITY: issue titles and PR review bodies are attacker-
+      # controlled free text (anyone who can open an issue or leave a
+      # review controls this content). They are passed in via `env:` and
+      # referenced as `"$VAR"` inside the heredoc below, never spliced
+      # directly into this run: block's script text via `${{ }}`. This
+      # matters because `${{ }}` substitution happens at the YAML level,
+      # before bash ever parses the script -- text containing backticks,
+      # `$(...)`, or quotes spliced in that way becomes part of the
+      # script's *source code*, not data, and can execute arbitrary
+      # commands on the runner. A bash variable expansion (`$VAR`) is a
+      # single-pass substitution -- its value is inserted as plain text
+      # and is never re-parsed as further shell syntax -- which is why
+      # this is safe even for a hostile title. This is the same pattern
+      # traceability.yml already uses for `$PR_TITLE`; see PR #79's review
+      # thread (issue #75) for the incident that established it as this
+      # repo's standard for handling untrusted webhook text in a `run:`
+      # step.
+      - name: Build prompt for this trigger
+        id: build_prompt
+        if: >-
+          github.event_name == 'issues' ||
+          steps.round_count.outputs.count < env.MAX_AUTO_FIX_ROUNDS
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "prompt<<PROMPT_EOF_8f3a2b91"
+            if [ "$EVENT_NAME" = "issues" ]; then
+              cat <<BODY
+          Implement GitHub issue #$ISSUE_NUMBER
+          ("$ISSUE_TITLE") in this repository.
+
+          Follow the conventions in CLAUDE.md: work on a dedicated
+          feature branch (never commit directly to main), include tests
+          for the behavior you add, and run the build/tests/linters
+          locally before finishing.
+
+          Open a pull request whose title references issue
+          #$ISSUE_NUMBER (e.g. include "#$ISSUE_NUMBER" in the title) --
+          this repo's traceability CI check requires an FR-xxx or #N
+          reference in the PR title, and will fail the PR without it.
+
+          The PR body must also contain a literal, correctly-formed
+          GitHub closing-keyword line -- e.g. "Closes #$ISSUE_NUMBER" or
+          "Fixes #$ISSUE_NUMBER" -- with the keyword immediately followed
+          by "#$ISSUE_NUMBER" and no other words in between. This is
+          required in addition to the title reference: the title alone
+          satisfies traceability.yml but does not auto-close the issue on
+          merge, since GitHub only reads closing keywords from the PR
+          body or commit messages, never the title. Do not use a
+          non-closing reference like "Refs #N" or phrasing like "closes
+          issue #N" -- both fail to close the issue even though they look
+          like they should (see issue #74).
+
+          Do not merge the PR yourself. Merge is always a human action in
+          this repo, gated on CI passing and an independent review.
+          BODY
+            else
+              cat <<BODY
+          A reviewer requested changes on PR #$PR_NUMBER in this
+          repository ($REPO).
+
+          Fetch the review's actual content yourself before doing
+          anything else -- this prompt does not include it:
+            gh api repos/$REPO/pulls/$PR_NUMBER/reviews \\
+              --jq '[.[] | select(.state=="CHANGES_REQUESTED")] | last | .body'
+          Read the real, current review text this way rather than
+          guessing at what it might say.
+
+          Check out the branch this PR is already on -- do NOT create a
+          new branch, do NOT open a new PR. Address the specific,
+          concrete points the review raised; do not expand scope beyond
+          what it actually asked for.
+
+          Run the build/tests/linters locally before finishing, exactly
+          as you would for a fresh implementation.
+
+          Commit your fix with a clear message referencing that it
+          addresses this review round, and push it to this same branch
+          -- this updates the existing PR in place. Do NOT open a new PR,
+          do NOT create a new branch.
+
+          Do not merge the PR yourself. Merge is always a human action in
+          this repo, gated on CI passing and an independent review.
+          BODY
+            fi
+            echo "PROMPT_EOF_8f3a2b91"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code (developer agent, unattended)
+        if: steps.build_prompt.outcome == 'success'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_DEV }}
 
-          prompt: |
-            Implement GitHub issue #${{ github.event.issue.number }}
-            ("${{ github.event.issue.title }}") in this repository.
-
-            Follow the conventions in CLAUDE.md: work on a dedicated
-            feature branch (never commit directly to main), include tests
-            for the behavior you add, and run the build/tests/linters
-            locally before finishing.
-
-            Open a pull request whose title references issue
-            #${{ github.event.issue.number }} (e.g. include
-            "#${{ github.event.issue.number }}" in the title) -- this repo's
-            traceability CI check requires an FR-xxx or #N reference in the
-            PR title, and will fail the PR without it.
-
-            The PR body must also contain a literal, correctly-formed
-            GitHub closing-keyword line -- e.g. "Closes #${{ github.event.issue.number }}"
-            or "Fixes #${{ github.event.issue.number }}" -- with the keyword
-            immediately followed by "#${{ github.event.issue.number }}" and
-            no other words in between. This is required in addition to the
-            title reference: the title alone satisfies traceability.yml but
-            does not auto-close the issue on merge, since GitHub only reads
-            closing keywords from the PR body or commit messages, never the
-            title. Do not use a non-closing reference like "Refs #N" or
-            phrasing like "closes issue #N" -- both fail to close the issue
-            even though they look like they should (see issue #74).
-
-            Do not merge the PR yourself. Merge is always a human action in
-            this repo, gated on CI passing and an independent review.
+          prompt: ${{ steps.build_prompt.outputs.prompt }}
 
           # --agent is a documented `claude` CLI flag (code.claude.com/docs/en/cli-reference).
           # Confirmed working through claude_args in the Action's automation
@@ -110,10 +268,13 @@ jobs:
           # default GITHUB_TOKEN. GitHub does not trigger downstream
           # workflows (CI, traceability) on commits pushed with the default
           # GITHUB_TOKEN, and M5's CI gate depends on CI actually running
-          # on the resulting PR.
+          # on the resulting PR. This applies equally to both trigger paths
+          # -- the review-triggered fix commit needs CI to re-run just as
+          # much as the original implementation commit did.
 
-      # No auto-merge step here, deliberately. The PR this produces sits
-      # exactly like every other PR in this repo: CI must pass, `reviewer`
-      # and `qa` still run as separate, manually-invoked sessions (not
-      # automated by M8), and a human merges. The point of M8 is proving
-      # unattended work clears the same gates, not skipping them.
+      # No auto-merge step here, deliberately, on either path. The PR this
+      # produces sits exactly like every other PR in this repo: CI must
+      # pass, `reviewer` and `qa` still run as separate, manually-invoked
+      # sessions (not automated by M8), and a human merges. The point of
+      # M8 is proving unattended work clears the same gates, not skipping
+      # them -- extending it to review-triggered fixes doesn't change that.
