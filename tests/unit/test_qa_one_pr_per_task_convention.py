@@ -34,14 +34,52 @@ def _normalized(text: str) -> str:
 
 
 def test_qa_md_no_longer_instructs_writing_exactly_one_artifact_unqualified():
-    # The old instruction ("Write exactly one artifact") said nothing
-    # about *which* branch that artifact belongs on, which is exactly what
-    # let the two-PR practice drift in. Guard against a regression back to
-    # the bare, branch-agnostic phrasing.
-    text = QA_MD.read_text()
+    # The pre-#80 qa.md said nothing about *which* branch the artifact
+    # belongs on -- exactly what let the two-PR practice drift in. It read,
+    # verbatim, as a complete standalone bullet with nothing else attached:
+    #
+    #   "Write exactly one artifact: a validation report under
+    #   `docs/validation/`, one per task/PR, structured as requirement ->
+    #   evidence -> pass/fail."
+    #
+    # Guard against a regression back to that bare, branch-agnostic
+    # phrasing with a positive assertion: wherever this sentence appears,
+    # the branch qualifier must be attached directly to it -- not merely
+    # present *somewhere, unrelated, elsewhere in the file*. (A prior
+    # version of this test used an `X or Y` disjunction that a stray "own
+    # branch" mention anywhere in the document would satisfy, even if this
+    # exact sentence were reverted to its old, unqualified form -- it
+    # never actually enforced that the qualifier was attached to the
+    # sentence it was meant to qualify.)
+    # Explicit encoding: qa.md is authored UTF-8 (it contains "->" as a
+    # literal unicode arrow); relying on the platform default here would
+    # mis-decode that arrow on Windows (cp1252) and make the exact-sentence
+    # match below spuriously fail.
+    text = QA_MD.read_text(encoding="utf-8")
     normalized = _normalized(text)
-    assert "write exactly one artifact: a validation report" not in normalized or (
-        "own branch" in normalized or "same branch" in normalized
+
+    old_bare_sentence = (
+        "write exactly one artifact: a validation report under "
+        "`docs/validation/`, one per task/pr, structured as requirement "
+        "→ evidence → pass/fail."
+    )
+    assert old_bare_sentence in normalized, (
+        "expected fixture sentence not found verbatim in qa.md -- if the "
+        "wording legitimately changed, update this test's expected text"
+    )
+
+    # Only the text immediately following the sentence -- up to the next
+    # bullet -- counts as "attached to it". Text elsewhere in the file
+    # doesn't qualify this sentence just by existing.
+    after_sentence = normalized.split(old_bare_sentence, 1)[1]
+    next_bullet = after_sentence.find(" - ")
+    attached_text = after_sentence if next_bullet == -1 else after_sentence[:next_bullet]
+
+    assert "own branch" in attached_text or "same branch" in attached_text, (
+        "the 'write exactly one artifact' sentence must be immediately "
+        "qualified with which branch the report belongs on (e.g. 'own "
+        "branch' / 'same branch') in the same bullet -- not left as a "
+        "bare, standalone instruction the way it was before #80"
     )
 
 
