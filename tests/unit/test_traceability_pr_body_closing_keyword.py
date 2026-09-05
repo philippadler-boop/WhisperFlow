@@ -173,6 +173,62 @@ def test_adversarial_rm_payload_in_pr_body_does_not_delete_existing_file(tmp_pat
     assert victim.read_text() == "do not delete"
 
 
+# --- Positive control for the adversarial tests above (PR #79 review) ------
+#
+# The adversarial tests above assert `not marker.exists()`. That assertion
+# would pass identically whether the script is actually safe, or whether the
+# test harness itself is broken (wrong tmp_path scoping, wrong env dict, a
+# bash-resolution issue that silently no-ops `_run`) -- a broken harness
+# would just never observe the marker either way. This test proves the
+# harness would in fact catch a real injection: it runs the same
+# subprocess/env/tmp_path plumbing as `_run` (and the same payload style)
+# against a small, deliberately naive/vulnerable script that re-interprets
+# PR_BODY via `eval`, and asserts the marker DOES get created there. That
+# makes the "marker never created" result above meaningful evidence of
+# safety, rather than a vacuous pass.
+def test_positive_control_methodology_detects_a_real_injection(tmp_path):
+    vulnerable = tmp_path / "vulnerable.sh"
+    vulnerable.write_text(
+        '#!/usr/bin/env bash\nset -euo pipefail\neval "echo ${PR_BODY:-}" >/dev/null\n'
+    )
+    vulnerable.chmod(0o755)
+
+    marker = tmp_path / "pwned"
+    # Deliberately the "command-substitution" payload shape from the
+    # adversarial tests above, not the "semicolon-sequencing" one: bash
+    # treats a bare `#` as starting a comment that runs to end of line, so
+    # "Closes #75; touch <marker>" -- fed through this script's `eval` --
+    # has its `; touch <marker>` swallowed by the comment starting at `#75`
+    # and would never fire, even against this genuinely vulnerable script
+    # (confirmed by manually running both variants against it). Putting the
+    # payload on its own line after a newline sidesteps that.
+    #
+    # `.as_posix()` (forward slashes), not the plain WindowsPath str (which
+    # is backslash-separated): Git Bash on Windows treats an un-quoted
+    # backslash as an escape character, so `touch C:\Users\...\pwned` has
+    # every backslash stripped and silently touches a mangled, wrong-named
+    # file in the cwd instead of `marker` -- a second path-shaped footgun
+    # in this harness, distinct from the shell-metacharacter one this test
+    # exists to guard against, but one that would also make this positive
+    # control (and by extension the adversarial tests' shared plumbing)
+    # falsely look like the vulnerability wasn't detected on Windows.
+    body = f"Closes #75\n$(touch {marker.as_posix()})"
+    env = {**os.environ, "PR_BODY": body}
+
+    result = subprocess.run(
+        ["bash", str(vulnerable)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert marker.exists(), (
+        "harness failed to detect injection in a known-vulnerable script -- "
+        "the adversarial tests above would pass vacuously if this happened"
+    )
+
+
 @pytest.mark.skipif(
     not _WORKFLOW_WIRED,
     reason=(
