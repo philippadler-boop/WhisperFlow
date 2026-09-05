@@ -156,6 +156,57 @@ class TestProbeVideoMocked:
             probe_video(video_path)
         assert exc_info.value.detected_format == "avi"
 
+    def test_empty_format_name_with_supported_extension_is_rejected(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # ffprobe ran successfully (returncode 0, parseable JSON) but
+        # reported an empty format_name -- zero genuine corroboration for
+        # *any* container, supported or not. A supported-looking extension
+        # alone (".mp4") must not be enough to pass the file, since that
+        # would be the exact same "extension alone confers a
+        # SUPPORTED_VIDEO_FORMATS value" defect already fixed for the
+        # ambiguous-match branch, just reached via an empty match set
+        # instead of an ambiguous one.
+        video_path = tmp_path / "clip.mp4"
+        video_path.touch()
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **k: _ffprobe_result(format_name=""),
+        )
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+        assert exc_info.value.detected_format is None
+
+    def test_missing_format_name_key_with_supported_extension_is_rejected(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # Same as the empty-string case above, but the format_name key is
+        # entirely absent from ffprobe's JSON rather than present-and-empty.
+        # `_detect_container_format` reads it via
+        # `probe_data.get("format", {}).get("format_name", "")`, so a
+        # missing key and an empty string hit the identical code path --
+        # this test exists to pin that equivalence down explicitly rather
+        # than leave it merely inferred from the empty-string case.
+        video_path = tmp_path / "clip.mp4"
+        video_path.touch()
+        payload = {
+            "streams": [{"codec_type": "audio", "codec_name": "aac"}],
+            "format": {"duration": "12.5"},
+        }
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **k: subprocess.CompletedProcess(
+                args=["ffprobe"], returncode=0, stdout=json.dumps(payload), stderr=""
+            ),
+        )
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+        assert exc_info.value.detected_format is None
+
     def test_ffprobe_failure_raises_unsupported_format(self, monkeypatch, tmp_path: Path):
         # e.g. a non-media file such as README.md (quickstart.md Scenario 5).
         not_a_video = tmp_path / "README.md"
