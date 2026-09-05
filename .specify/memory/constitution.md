@@ -82,6 +82,32 @@ Sync Impact Report (amendment 2026-09-04, third same-day amendment)
 - Added sections: none
 - Removed sections: none
 - Deferred TODOs: none.
+
+Sync Impact Report (amendment 2026-09-05)
+- Version change: 1.2.0 -> 1.3.0
+- Rationale: MINOR -- materially expanded guidance in Principle IV and
+  Principle V, no prior rule reversed (Principle V already said "one
+  [report] per task/PR"; this closes a gap the wording left open). Root
+  cause per issue #80: `git log --all --graph` across Phase 2 (T004-T008)
+  showed every task actually producing *two* PRs -- the implementation PR,
+  then a separate PR for qa's validation report on its own branch, merging
+  4-36 minutes after the implementation already merged to main. That means
+  the validation evidence this project's evidence-over-self-report
+  discipline depends on lands after the merge decision it's supposed to
+  inform, which the constitution never intended -- it drifted in as a
+  practice, not something Principle V called for. Fixed by making explicit
+  that "one per task/PR" means the *same* PR: qa checks out the
+  implementation's own branch and pushes the report there.
+- Modified principles: IV. Branch-per-Task, Protected Main (adds "one PR
+  per that branch" and that qa's report lands on it, not a second
+  branch/PR); V. Evidence-Based Validation (clarifies "one per task/PR"
+  means the same PR as the implementation, not a follow-up one)
+- Added sections: none
+- Removed sections: none
+- Templates checked for alignment: no template edits needed -- this
+  amendment clarifies existing principle wording, not the plan/tasks
+  templates' own content.
+- Deferred TODOs: none.
 -->
 
 # WhisperFlow Constitution
@@ -130,9 +156,15 @@ confirm a PR does what it claims rather than just that it looks
 plausible.
 
 ### IV. Branch-per-Task, Protected Main
-One feature branch per GitHub Issue, cut from `main`. Nobody — human or
-subagent — commits directly to `main`; `main` is branch-protected and
-every change lands via PR.
+One feature branch per GitHub Issue, cut from `main`, and **one PR per
+that branch** — not two. Nobody — human or subagent — commits directly to
+`main`; `main` is branch-protected and every change lands via PR. `qa`'s
+validation report (Principle V) is committed onto that same branch,
+updating the same PR the merge decision is made on, not pushed to a
+second branch or opened as a follow-up PR after the fact. If the
+implementation's branch or PR is missing or already merged by the time
+`qa` runs, that is a process-order defect to report, not a reason to open
+a new branch/PR to route around it.
 
 **Spec Kit's planning phases also use a real feature branch, not `main`
 directly.** Before running `/speckit.specify`, create and check out a
@@ -168,7 +200,10 @@ sign-off over content that was already sitting on `main` regardless.
 by itself, evidence that a requirement is met — it confirms tests passed,
 not that the right thing was built. Each validation report lives under
 `docs/validation/`, one per task/PR, structured as requirement → evidence
-→ pass/fail.
+→ pass/fail. "One per task/PR" means the *same* PR as the implementation:
+`qa` checks out the implementation's own branch, commits the report
+there, and pushes to update that existing PR (Principle IV) — it does not
+open a second PR for the report.
 
 Rationale: CI verifies what was written against the tests that were
 written; it cannot verify that what was asked for actually exists.
@@ -232,4 +267,4 @@ Every PR and every `reviewer` review MUST verify compliance with the
 principles above. Any deviation from a principle MUST be justified
 explicitly in the PR description, not introduced silently.
 
-**Version**: 1.2.0 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-04
+**Version**: 1.3.0 | **Ratified**: 2026-09-03 | **Last Amended**: 2026-09-05
