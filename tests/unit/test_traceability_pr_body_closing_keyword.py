@@ -31,6 +31,7 @@ actually asserting once the manual follow-up is applied.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -43,9 +44,18 @@ _WORKFLOW_WIRED = "check_pr_body_closing_keyword.sh" in WORKFLOW.read_text()
 
 
 def _run(pr_body: str) -> subprocess.CompletedProcess:
+    # Inherit the invoking process's own PATH rather than hard-coding a
+    # POSIX one (e.g. "/usr/bin:/bin"): that literal string isn't a valid
+    # Windows PATH entry, so a hard-coded override would make `bash` itself
+    # fail to resolve (FileNotFoundError) when these tests are run from a
+    # plain Windows shell rather than Git Bash, even though this repo is
+    # otherwise developed on Windows. Inheriting os.environ keeps whatever
+    # PATH already let the current Python process (and therefore pytest)
+    # run in the first place, on every platform.
+    env = {**os.environ, "PR_BODY": pr_body}
     return subprocess.run(
         ["bash", str(SCRIPT)],
-        env={"PR_BODY": pr_body, "PATH": "/usr/bin:/bin"},
+        env=env,
         capture_output=True,
         text=True,
     )
@@ -96,14 +106,71 @@ def test_missing_or_malformed_closing_reference_warns_but_does_not_fail(body):
 
 
 def test_unset_pr_body_does_not_error():
+    env = {k: v for k, v in os.environ.items() if k != "PR_BODY"}
     result = subprocess.run(
         ["bash", str(SCRIPT)],
-        env={"PATH": "/usr/bin:/bin"},
+        env=env,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
     assert "::warning::" in result.stdout
+
+
+# --- Adversarial payloads (PR #79 review) -----------------------------------
+#
+# The script never `eval`s or otherwise re-parses PR_BODY as shell source --
+# it only ever expands it as a quoted variable's *value* (`"${PR_BODY:-}"`),
+# which bash does not re-tokenize for metacharacters. These cases exist to
+# pin that property down as an executable regression test: a future refactor
+# that started interpolating PR_BODY into a command string (or otherwise
+# re-parsing it) should fail here, rather than being caught only by manual
+# review as happened with #38/#63/#71 (see #74/#75).
+#
+# Each payload targets a unique, per-test-invocation temp path and then
+# asserts on the filesystem, not just on the exit code -- proving the
+# injected command genuinely never ran, not merely that the script didn't
+# crash while it was embedded in PR_BODY.
+@pytest.mark.parametrize(
+    "make_payload",
+    [
+        lambda marker: f"Closes #75\n$(touch {marker})",
+        lambda marker: f"Closes #75; touch {marker}",
+        lambda marker: f"Closes #75 `touch {marker}`",
+        lambda marker: f'Closes #75"; touch {marker}; echo "',
+    ],
+    ids=[
+        "command-substitution",
+        "semicolon-sequencing",
+        "backticks",
+        "double-quote-breakout",
+    ],
+)
+def test_adversarial_shell_metacharacters_in_pr_body_are_never_executed(
+    tmp_path, make_payload
+):
+    marker = tmp_path / "pwned"
+    body = make_payload(marker)
+
+    result = _run(body)
+
+    assert result.returncode == 0
+    assert not marker.exists(), (
+        "PR_BODY containing shell metacharacters must never be executed as "
+        f"a command, but the injected payload's target file was created: {marker}"
+    )
+
+
+def test_adversarial_rm_payload_in_pr_body_does_not_delete_existing_file(tmp_path):
+    victim = tmp_path / "pwned_target"
+    victim.write_text("do not delete")
+    body = f"Closes #75; rm -rf {victim}"
+
+    result = _run(body)
+
+    assert result.returncode == 0
+    assert victim.exists(), "injected `rm -rf` must never actually run"
+    assert victim.read_text() == "do not delete"
 
 
 @pytest.mark.skipif(
