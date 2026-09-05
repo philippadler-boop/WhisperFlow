@@ -54,6 +54,27 @@ def _mentions_recognized_keyword_set(text: str) -> bool:
     return sum(1 for kw in CLOSING_KEYWORDS if kw in lowered) >= 6
 
 
+def _documents_immediately_followed_nuance(text: str) -> bool:
+    """True if the text spells out the specific "keyword immediately
+    followed by #N, with no other words in between" nuance -- as distinct
+    from just listing the recognized keywords. This is the exact detail
+    that caused PR #38's failure ("closes issue #1" was accepted as if it
+    were a valid closing keyword, because a word sat between the keyword
+    and the `#N`), so it's the single highest-value thing to guard against
+    regressing.
+
+    Both `CLAUDE.md` and `developer.md` wrap this sentence across a
+    manually-wrapped markdown line, so the phrases below can span a
+    newline in the raw source; whitespace is normalized before matching so
+    that wrapping doesn't hide a missing/reworded nuance.
+    """
+    normalized = re.sub(r"\s+", " ", text.lower())
+    return (
+        "immediately followed by" in normalized
+        and "no other words in between" in normalized
+    )
+
+
 def test_claude_md_documents_pr_body_closing_keyword_convention():
     text = CLAUDE_MD.read_text()
     assert "Closes #N" in text or "closes #N" in text.lower()
@@ -61,6 +82,9 @@ def test_claude_md_documents_pr_body_closing_keyword_convention():
     assert _mentions_recognized_keyword_set(text)
     # Should call out that a title-only reference is not sufficient.
     assert "title-only" in text.lower() or "title only" in text.lower()
+    # Should spell out the "keyword immediately followed by #N, no other
+    # words in between" nuance -- not just list the recognized keywords.
+    assert _documents_immediately_followed_nuance(text)
 
 
 def test_developer_agent_documents_pr_body_closing_keyword_convention():
@@ -68,6 +92,9 @@ def test_developer_agent_documents_pr_body_closing_keyword_convention():
     assert "Closes #N" in text or "closes #n" in text.lower()
     assert re.search(r"\*\*body\*\*|\bbody\b", text)
     assert _mentions_recognized_keyword_set(text)
+    # Should spell out the "keyword immediately followed by #N, no other
+    # words in between" nuance -- not just list the recognized keywords.
+    assert _documents_immediately_followed_nuance(text)
 
 
 def test_developer_agent_still_requires_title_reference():
