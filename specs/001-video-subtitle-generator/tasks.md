@@ -54,7 +54,7 @@ description: "Task list template for feature implementation"
 ### Implementation for User Story 1
 
 - [x] T009 [P] [US1] Implement video probing (`container_format`, `duration_seconds`, `has_audio_track` via `ffmpeg`) in `src/audio/video_probe.py` (data-model.md — Video; spec FR-001, FR-007)
-- [ ] T010 [P] [US1] Implement audio extraction (ffmpeg subprocess → mono 16kHz WAV) in `src/audio/extract.py` (data-model.md — AudioTrack; spec FR-001; research.md — Audio extraction)
+- [x] T010 [P] [US1] Implement audio extraction (ffmpeg subprocess → mono 16kHz WAV) in `src/audio/extract.py` (data-model.md — AudioTrack; spec FR-001; research.md — Audio extraction)
 - [ ] T011 [US1] Implement `faster-whisper`-based transcription producing a time-coded `Transcript`/`TranscriptSegment` list in `src/transcription/transcribe.py` (depends on T010) (data-model.md — Transcript; spec FR-002, FR-004; research.md — Local ASR engine)
 - [ ] T012 [US1] Implement transcript-segments → initial `SubtitleLine`/`SubtitleFile` conversion and `.srt` file writing in `src/subtitles/writer.py` (depends on T005, T011) (spec FR-003, FR-006)
 - [ ] T013 [US1] Implement pipeline orchestration (probe → extract → transcribe → write), wiring per-stage progress via T006 and handling the zero-speech-detected case as a successful run with a clear stderr notice in `src/cli/pipeline.py` (depends on T009, T010, T011, T012, T006) (spec FR-008, FR-011)
