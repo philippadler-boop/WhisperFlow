@@ -63,7 +63,31 @@ def _run(pr_body: str) -> subprocess.CompletedProcess:
 
 def test_script_exists_and_is_executable():
     assert SCRIPT.is_file()
-    assert SCRIPT.stat().st_mode & 0o111, "script must be executable"
+
+    # Check the mode git actually tracks for this file, not what the local
+    # OS reports via os.stat()/os.access(): Windows has no POSIX executable
+    # bit concept at all, so a stat()-based check fails there unconditionally
+    # regardless of what's committed, while telling us nothing about what CI
+    # (which runs on Linux and does honor the bit) will actually see. `git
+    # ls-files -s` reports the mode stored in the git index -- the thing
+    # that genuinely determines executability when the repo is checked out
+    # on Linux -- so this is meaningful and passes on every platform.
+    rel_path = SCRIPT.relative_to(REPO_ROOT).as_posix()
+    result = subprocess.run(
+        ["git", "ls-files", "-s", rel_path],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    output = result.stdout.strip()
+    assert output, f"{rel_path} is not tracked by git"
+
+    tracked_mode = output.split()[0]
+    assert int(tracked_mode, 8) & 0o111, (
+        f"script must be tracked in git as executable (mode 100755), "
+        f"but git ls-files reports mode {tracked_mode}"
+    )
 
 
 @pytest.mark.parametrize(
