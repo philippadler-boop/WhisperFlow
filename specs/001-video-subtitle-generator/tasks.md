@@ -38,7 +38,7 @@ description: "Task list template for feature implementation"
 - [x] T004 [P] Implement domain error types `UnsupportedVideoFormatError`, `MaxDurationExceededError`, `FfmpegNotFoundError` in `src/lib/errors.py` (spec FR-007; data-model.md validation rules)
 - [x] T005 [P] Implement `SubtitleLine` and `SubtitleFile` data classes plus `.srt` composition (via the `srt` library) in `src/subtitles/models.py` — shared by US1 (creates) and US2 (edits) (data-model.md — SubtitleLine/SubtitleFile; spec FR-006)
 - [x] T006 [P] Implement the `ProcessingJob` stage model (`ExtractingAudio` → `Transcribing` → `WritingSubtitles` → `AwaitingReview` → `Done`/`Failed`) and a stderr stage/percentage progress reporter in `src/cli/progress.py` (data-model.md — ProcessingJob; spec FR-011)
-- [ ] T007 [P] Implement the `whisperflow transcribe VIDEO_PATH` CLI skeleton — argument and all options (`--output`, `--model`, `--review/--no-review`, `--editor`) parsed per contracts/cli.md, wired to a not-yet-implemented pipeline call — in `src/cli/main.py` (spec FR-005)
+- [x] T007 [P] Implement the `whisperflow transcribe VIDEO_PATH` CLI skeleton — argument and all options (`--output`, `--model`, `--review/--no-review`, `--editor`) parsed per contracts/cli.md, wired to a not-yet-implemented pipeline call — in `src/cli/main.py` (spec FR-005)
 - [ ] T008 Contract test asserting the CLI's argument/option surface, defaults, and `--help` output match contracts/cli.md in `tests/contract/test_cli_contract.py` (depends on T007)
 
 **Checkpoint**: Foundation ready — user story implementation can now begin
