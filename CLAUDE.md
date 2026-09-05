@@ -85,7 +85,11 @@ container boundary for that unattended work rather than a devcontainer.
   plus `architect`'s ADRs) also use a real feature branch, merged to
   `main` via PR at Design Gate approval -- not `main` directly. See
   constitution.md Principle IV (video-subtitle-generator is a documented
-  one-time exception; every feature after it must have a branch).
+  one-time exception; every feature after it must have a branch). One
+  branch means one PR per task: `qa`'s validation report is committed onto
+  that same branch (updating the existing PR), not pushed to a second
+  branch/PR opened after the fact -- see constitution.md Principle IV/V
+  and `qa.md`.
 - Every PR references the `FR-`/issue ID it implements. This becomes a
   required CI check later, but treat it as a hard rule from the first PR
   on, not something that starts mattering once the check exists.
