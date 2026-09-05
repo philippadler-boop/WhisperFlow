@@ -37,5 +37,11 @@ src = ["src", "tests", "scripts"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+# Typer's `typer.Argument(...)`/`typer.Option(...)` calls are meant to be
+# used as parameter defaults (that's how Typer discovers CLI options) --
+# flake8-bugbear's B008 false-positives on this well-known pattern.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
