@@ -3,10 +3,11 @@
 Covers `extract_audio()`'s happy path (mono/16kHz WAV extraction via a
 mocked `subprocess.run`, so most cases don't depend on a real `ffmpeg`
 install), its two failure modes (`FfmpegNotFoundError`,
-`AudioExtractionError`), temp-file lifecycle (auto-generated vs.
-caller-supplied output path, cleanup on failure), and a couple of
-end-to-end sanity checks against the real `ffmpeg` binary and fixture
-videos.
+`AudioExtractionError` -- including `ffmpeg` being present on `PATH` but
+unable to be launched, e.g. `PermissionError`), temp-file lifecycle
+(auto-generated vs. caller-supplied output path, cleanup on failure), and
+a couple of end-to-end sanity checks against the real `ffmpeg` binary and
+fixture videos.
 """
 
 from __future__ import annotations
@@ -238,6 +239,62 @@ class TestExtractAudioMocked:
         monkeypatch.setattr(subprocess, "run", _raise_file_not_found)
 
         with pytest.raises(FfmpegNotFoundError):
+            extract_audio(video)
+
+        assert created_paths, "temp path was never created"
+        assert not created_paths[0].exists()
+
+    def test_ffmpeg_unlaunchable_for_reason_other_than_missing_raises_extraction_error(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # PR #85 review (third pass): PermissionError (and other OSError
+        # subclasses subprocess.run can raise for a binary that's present
+        # on PATH but can't actually be started -- e.g. blocked/
+        # non-executable, or a corrupt/wrong-architecture binary) is not a
+        # FileNotFoundError, so it used to escape the narrow
+        # `except FileNotFoundError` entirely as a raw OSError, breaking
+        # this function's documented "never a raw OSError" contract.
+        # Distinct from FfmpegNotFoundError deliberately: ffmpeg *is* on
+        # PATH here, it just couldn't be launched, so
+        # FfmpegNotFoundError's "install ffmpeg and ensure it is on PATH"
+        # message would be actively misleading.
+        video = _video(tmp_path)
+
+        def _raise_permission_error(*args, **kwargs):
+            raise PermissionError("[Errno 13] Permission denied: 'ffmpeg'")
+
+        monkeypatch.setattr(subprocess, "run", _raise_permission_error)
+
+        with pytest.raises(AudioExtractionError) as exc_info:
+            extract_audio(video)
+
+        assert not isinstance(exc_info.value, OSError)
+        assert not isinstance(exc_info.value, FfmpegNotFoundError)
+        assert str(video.path) in str(exc_info.value)
+
+    def test_ffmpeg_unlaunchable_for_reason_other_than_missing_cleans_up_owned_temp_file(
+        self, monkeypatch, tmp_path: Path
+    ):
+        video = _video(tmp_path)
+        created_paths: list[Path] = []
+
+        import audio.extract as extract_module
+
+        original_new_temp_wav_path = extract_module._new_temp_wav_path
+
+        def _capturing_new_temp_wav_path() -> Path:
+            path = original_new_temp_wav_path()
+            created_paths.append(path)
+            return path
+
+        monkeypatch.setattr(extract_module, "_new_temp_wav_path", _capturing_new_temp_wav_path)
+
+        def _raise_permission_error(*args, **kwargs):
+            raise PermissionError("[Errno 13] Permission denied: 'ffmpeg'")
+
+        monkeypatch.setattr(subprocess, "run", _raise_permission_error)
+
+        with pytest.raises(AudioExtractionError):
             extract_audio(video)
 
         assert created_paths, "temp path was never created"

@@ -6,10 +6,10 @@ pull a mono, 16kHz WAV file out of a `Video` that video probing (T009,
 `src/audio/video_probe.py`) has already validated -- container format
 supported and duration within the 2-hour cap (spec FR-007). Because
 probing already ran first, this module only needs to guard against two
-failure modes of its own: the `ffmpeg` binary being missing from `PATH`,
-and `ffmpeg` itself failing while it runs (e.g. a stream ffprobe could
-read but ffmpeg can't decode, or a video with no audio stream to extract
-at all).
+failure modes of its own: the `ffmpeg` binary being missing from (or
+present on but unable to be launched from) `PATH`, and `ffmpeg` itself
+failing while it runs (e.g. a stream ffprobe could read but ffmpeg can't
+decode, or a video with no audio stream to extract at all).
 
 The mono/16kHz shape is fixed, not configurable, because it matches
 exactly what `faster-whisper`/CTranslate2 (ADR 0001) expects as input --
@@ -90,11 +90,17 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
         written to, and the fixed `SAMPLE_RATE_HZ`.
 
     Raises:
-        FfmpegNotFoundError: `ffmpeg` is not on `PATH` (contracts/cli.md).
+        FfmpegNotFoundError: `ffmpeg` is not on `PATH` (contracts/cli.md),
+            including the race where `shutil.which()` found it but it's
+            gone by the time `subprocess.run()` actually tries to launch
+            it.
         AudioExtractionError: `ffmpeg` ran but exited non-zero (e.g. a
             corrupt stream, or a video with no audio stream to extract),
             or exited zero without actually writing a non-empty output
-            file, or (when `output_path` is given) the confirmed-good
+            file, or `ffmpeg` is on `PATH` but could not be launched for a
+            reason other than being missing (e.g. `PermissionError` on a
+            blocked/non-executable binary, or a corrupt/wrong-architecture
+            binary), or (when `output_path` is given) the confirmed-good
             temp file could not be moved onto it (disk full, a
             permission/lock error, or an unrecoverable cross-device
             move) -- never a raw `OSError`/`shutil.Error` (PR #85
@@ -139,14 +145,34 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
             check=False,
         )
     except FileNotFoundError as exc:
-        # Race: shutil.which() found it, but it's gone (or unexecutable) by
-        # the time subprocess actually tries to run it (mirrors T009's
-        # identical guard around ffprobe). Don't leak the empty temp file
+        # Race: shutil.which() found it, but it's gone by the time
+        # subprocess actually tries to run it (mirrors T009's identical
+        # guard around ffprobe). Don't leak the empty temp file
         # `_new_temp_wav_path()` created before we ever got here. The
         # caller's output_path (if any) was never touched, so there's
         # nothing to restore there.
         temp_output.unlink(missing_ok=True)
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE) from exc
+    except OSError as exc:
+        # Every other OSError subclass subprocess.run can raise for a
+        # binary that IS present on PATH but can't actually be launched --
+        # PermissionError (blocked/non-executable), NotADirectoryError (a
+        # PATH component collision), or a corrupt/wrong-architecture binary
+        # (surfaces as a plain OSError, e.g. "Exec format error"). Deliberately
+        # *not* folded into FfmpegNotFoundError above: that error's message
+        # ("install ffmpeg and ensure it is on PATH") would be actively
+        # wrong here -- ffmpeg *is* on PATH, it just couldn't be started --
+        # so this is reported as AudioExtractionError instead, same as any
+        # other extraction failure (PR #85 review: this except clause was
+        # previously narrowed to FileNotFoundError only, so every other
+        # OSError subclass escaped raw, contradicting this function's own
+        # documented "never a raw OSError" contract). Same cleanup as every
+        # other failure exit: never leak temp_output.
+        temp_output.unlink(missing_ok=True)
+        raise AudioExtractionError(
+            video.path,
+            stderr=f"failed to run '{FFMPEG_EXECUTABLE}': {exc}",
+        ) from exc
 
     if result.returncode != 0:
         # Don't leak a partial/empty temp file for a run the caller never
