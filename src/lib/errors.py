@@ -134,6 +134,34 @@ class MaxDurationExceededError(WhisperFlowError):
         super().__init__(message)
 
 
+class AudioExtractionError(WhisperFlowError):
+    """`ffmpeg` ran but failed to extract audio from the input video.
+
+    Raised by audio extraction (T010, `src/audio/extract.py`) when the
+    `ffmpeg` binary itself exits non-zero while demuxing/re-encoding a
+    video that video probing (T009) already accepted as a supported
+    container -- e.g. a corrupt/truncated stream, or a video with no
+    audio stream at all to extract. Distinct from `FfmpegNotFoundError`
+    (the binary itself is missing from `PATH`) and from
+    `UnsupportedVideoFormatError` (the container format itself is
+    rejected up front by probing, before extraction is ever attempted).
+    Maps to CLI exit code 1 per contracts/cli.md's "ASR model failed to
+    load"-adjacent fatal-error bucket.
+    """
+
+    def __init__(self, path: str | Path, stderr: str = "") -> None:
+        self.path = Path(path)
+        self.stderr = stderr.strip()
+        # ffmpeg's stderr is typically many lines of build/codec banner
+        # noise followed by the actual failure reason on the last
+        # non-empty line -- surface just that line rather than dumping the
+        # whole banner into a single-line CLI error message.
+        detail_line = self.stderr.splitlines()[-1] if self.stderr else ""
+        detail = f": {detail_line}" if detail_line else ""
+        message = f"failed to extract audio from '{self.path}'{detail}"
+        super().__init__(message)
+
+
 class FfmpegNotFoundError(WhisperFlowError):
     """The required `ffmpeg` binary was not found on `PATH` (contracts/cli.md).
 

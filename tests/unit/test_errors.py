@@ -16,6 +16,7 @@ import pytest
 from lib.errors import (
     MAX_DURATION_SECONDS,
     SUPPORTED_VIDEO_FORMATS,
+    AudioExtractionError,
     FfmpegNotFoundError,
     MaxDurationExceededError,
     UnsupportedVideoFormatError,
@@ -118,6 +119,38 @@ class TestMaxDurationExceededError:
             raise MaxDurationExceededError(duration_seconds=10000.0)
 
 
+class TestAudioExtractionError:
+    def test_is_a_whisperflow_error(self):
+        assert issubclass(AudioExtractionError, WhisperFlowError)
+
+    def test_message_includes_path_and_last_stderr_line(self):
+        err = AudioExtractionError(
+            "/videos/clip.mp4",
+            stderr="ffmpeg version banner...\nmore banner\nUnknown encoder 'pcm'\n",
+        )
+        message = str(err)
+        assert str(Path("/videos/clip.mp4")) in message
+        assert "Unknown encoder 'pcm'" in message
+        # Only the last (most relevant) stderr line is surfaced, not the
+        # whole multi-line banner.
+        assert "banner" not in message
+
+    def test_message_without_stderr(self):
+        err = AudioExtractionError("/videos/clip.mp4")
+        message = str(err)
+        assert str(Path("/videos/clip.mp4")) in message
+        assert message == f"failed to extract audio from '{Path('/videos/clip.mp4')}'"
+
+    def test_exposes_path_and_stderr_attributes(self):
+        err = AudioExtractionError("/videos/clip.mp4", stderr="  boom  \n")
+        assert err.path == Path("/videos/clip.mp4")
+        assert err.stderr == "boom"
+
+    def test_raisable_and_catchable(self):
+        with pytest.raises(AudioExtractionError):
+            raise AudioExtractionError("clip.mp4", stderr="boom")
+
+
 class TestFfmpegNotFoundError:
     def test_is_a_whisperflow_error(self):
         assert issubclass(FfmpegNotFoundError, WhisperFlowError)
@@ -143,6 +176,7 @@ def test_all_domain_errors_are_catchable_via_common_base():
         UnsupportedVideoFormatError("clip.avi", detected_format="avi"),
         MaxDurationExceededError(duration_seconds=10000.0),
         FfmpegNotFoundError(),
+        AudioExtractionError("clip.mp4", stderr="boom"),
     ]
     for error in errors:
         with pytest.raises(WhisperFlowError):
