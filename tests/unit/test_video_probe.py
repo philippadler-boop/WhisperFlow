@@ -230,6 +230,40 @@ class TestProbeVideoMocked:
             probe_video(video_path)
         assert exc_info.value.detected_format == "3gp"
 
+    def test_mkv_extension_with_mp4_mov_family_container_is_rejected(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # A file named .mkv but whose real container is mp4/mov-family
+        # (ffprobe reports the shared "mov,mp4,m4a,3gp,3g2,mj2" demuxer
+        # tokens, with no matroska-related token at all) must not be
+        # accepted as "mkv" just because "mkv" happens to itself be a
+        # SUPPORTED_VIDEO_FORMATS entry -- the extension can disambiguate
+        # *within* a family ffprobe already matched, but must never be
+        # returned unchecked when it collides with an entirely different
+        # supported format ffprobe never actually detected.
+        video_path = tmp_path / "clip.mkv"
+        video_path.touch()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _ffprobe_result())
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+        assert exc_info.value.detected_format is None
+
+    @pytest.mark.parametrize("extension", ["m4a", "3g2", "mj2"])
+    def test_mp4_mov_family_siblings_are_rejected(
+        self, monkeypatch, tmp_path: Path, extension: str
+    ):
+        # Same shared demuxer as the .3gp case above -- these sibling
+        # extensions aren't in SUPPORTED_VIDEO_FORMATS either, so they must
+        # not be guessed into "mp4"/"mov" just because they share a demuxer.
+        video_path = tmp_path / f"clip.{extension}"
+        video_path.touch()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _ffprobe_result())
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+        assert exc_info.value.detected_format == extension
+
     def test_oversized_video_raises_max_duration_exceeded(self, monkeypatch, tmp_path: Path):
         video_path = tmp_path / "clip.mp4"
         video_path.touch()

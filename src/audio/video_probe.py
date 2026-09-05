@@ -209,8 +209,14 @@ def _detect_container_format(video_path: Path, probe_data: dict[str, Any]) -> st
             return next(iter(matched_supported))
         # Genuinely ambiguous within a shared demuxer (e.g. mp4 vs mov) and
         # the extension gives no signal to resolve it either way -- don't
-        # guess.
-        return extension or None
+        # guess. The extension is still surfaced for the caller's error
+        # message, but only if it can't itself be mistaken for a *different*
+        # supported format -- e.g. a file named "clip.mkv" whose real
+        # container is mp4/mov-family (format_name
+        # "mov,mp4,m4a,3gp,3g2,mj2") must not come back as "mkv" here, since
+        # that would pass the caller's `in SUPPORTED_VIDEO_FORMATS` check
+        # despite ffprobe never reporting anything matroska-related.
+        return extension if extension and extension not in SUPPORTED_VIDEO_FORMATS else None
 
     primary_token = format_name.split(",")[0].strip().lower()
     return primary_token or video_path.suffix.lower().lstrip(".") or None
