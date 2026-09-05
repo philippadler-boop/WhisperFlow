@@ -163,8 +163,15 @@ class TestExtractAudioMocked:
     def test_ffmpeg_failure_does_not_delete_caller_supplied_output(
         self, monkeypatch, tmp_path: Path
     ):
+        # ffmpeg only ever writes to the internal temp path, so a failed
+        # run never touches output_path at all -- a pre-existing file
+        # there (the caller's own, e.g. from an earlier successful run)
+        # must survive completely untouched: not deleted, not overwritten
+        # with the failed run's partial temp output.
         video = _video(tmp_path)
         desired_output = tmp_path / "audio.wav"
+        original_content = b"PRE-EXISTING-AUDIO-BYTES"
+        desired_output.write_bytes(original_content)
         monkeypatch.setattr(
             subprocess,
             "run",
@@ -175,8 +182,10 @@ class TestExtractAudioMocked:
             extract_audio(video, output_path=desired_output)
 
         # A caller-supplied path is the caller's own file to manage --
-        # extraction only deletes files it created itself.
+        # extraction only ever moves onto it after a confirmed success, so
+        # a failed run must leave it byte-for-byte as it found it.
         assert desired_output.exists()
+        assert desired_output.read_bytes() == original_content
 
     def test_missing_ffmpeg_binary_raises_ffmpeg_not_found(self, monkeypatch, tmp_path: Path):
         video = _video(tmp_path)
@@ -283,13 +292,17 @@ class TestExtractAudioMocked:
     def test_ffmpeg_success_leaving_preexisting_output_untouched_raises_extraction_error(
         self, monkeypatch, tmp_path: Path
     ):
-        # Residual gap found during PR #85 validation: a caller-supplied
-        # output_path that already exists with non-empty content, where
-        # ffmpeg exits 0 without actually touching it, must still raise --
-        # not silently return an AudioTrack pointing at the stale bytes.
-        # The exists()/non-empty check alone can't catch this because the
-        # pre-existing file already satisfies both conditions before
-        # ffmpeg ever runs.
+        # A caller-supplied output_path that already exists with non-empty
+        # content, where ffmpeg exits 0 but never actually writes anything
+        # (to its own temp path -- it never touches output_path directly
+        # any more), must still raise -- not silently return an AudioTrack
+        # pointing at output_path's stale bytes. Structurally this is now
+        # just the "ffmpeg produced no output" case (temp_output stays
+        # empty, since mkstemp created it empty and nothing wrote to it);
+        # it's kept as its own test specifically to pin down that a
+        # pre-existing caller file at output_path is left completely
+        # untouched when that happens, which is what PR #85 review flagged
+        # as unverified.
         video = _video(tmp_path)
         desired_output = tmp_path / "audio.wav"
         original_content = b"PRE-EXISTING-AUDIO-BYTES"
@@ -304,6 +317,34 @@ class TestExtractAudioMocked:
         # raising an error must not delete or modify it.
         assert desired_output.exists()
         assert desired_output.read_bytes() == original_content
+
+    def test_overwrites_stale_preexisting_output_on_genuine_success(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # PR #85 review: a genuinely successful re-run against the same
+        # caller-supplied output_path (e.g. a retry) must not be rejected,
+        # and must actually replace the stale content that was there
+        # before -- not leave it in place. This is the success-path
+        # counterpart to the "leaving preexisting output untouched" test
+        # above: here ffmpeg *does* write (different) output, so the
+        # pre-existing file must end up holding the new bytes.
+        video = _video(tmp_path)
+        desired_output = tmp_path / "audio.wav"
+        stale_content = b"STALE-AUDIO-FROM-A-PREVIOUS-RUN"
+        desired_output.write_bytes(stale_content)
+        new_content = b"RIFF....WAVEfmt fresh-run-bytes"
+
+        def _run(args, **kwargs):
+            Path(args[-1]).write_bytes(new_content)
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+
+        track = extract_audio(video, output_path=desired_output)
+
+        assert track.extracted_path == desired_output
+        assert desired_output.read_bytes() == new_content
+        assert desired_output.read_bytes() != stale_content
 
     def test_no_audio_track_video_surfaces_as_extraction_error(
         self, monkeypatch, tmp_path: Path

@@ -22,6 +22,14 @@ one, and returns an `AudioTrack`. It raises the shared `FfmpegNotFoundError`
 (also raised by T009's probing) if the binary isn't on `PATH`, and the new
 `AudioExtractionError` for any other `ffmpeg` failure, rather than letting
 a raw `subprocess`/`OSError` leak to the caller.
+
+`ffmpeg` is always pointed at a fresh, auto-generated temp path (never at a
+caller-supplied `output_path` directly) -- see `extract_audio()`'s
+docstring for why: it avoids having to infer "did ffmpeg actually write
+this?" from filesystem metadata, which a prior revision of this module
+attempted (comparing size/mtime before and after the run) and which PR #85
+review found could misclassify a genuine same-content retry as a no-op on
+coarse-mtime-granularity filesystems (FAT32/exFAT's ~2s ticks).
 """
 
 from __future__ import annotations
@@ -72,7 +80,10 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
             data-model.md describes this as a "Temporary WAV file,
             removed after the run", which the caller (the T013 pipeline)
             is responsible for cleaning up once transcription has
-            consumed it.
+            consumed it. If given, `ffmpeg` still writes to an internal
+            temp file first; once that write is confirmed to have
+            succeeded, the temp file is moved onto `output_path`,
+            overwriting anything already there.
 
     Returns:
         An `AudioTrack` referencing `video`, the path the WAV file was
@@ -83,28 +94,25 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
         AudioExtractionError: `ffmpeg` ran but exited non-zero (e.g. a
             corrupt stream, or a video with no audio stream to extract),
             or exited zero without actually writing a non-empty output
-            file. This also covers a caller-supplied `output_path` that
-            already existed (with content) before the call and that
-            `ffmpeg` left untouched -- an existence/size check alone can't
-            tell that apart from a genuine write, so the pre-call state of
-            that path is snapshotted below and compared afterwards.
+            file.
     """
     if shutil.which(FFMPEG_EXECUTABLE) is None:
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE)
 
-    owns_output_file = output_path is None
-    resolved_output = _new_temp_wav_path() if owns_output_file else Path(output_path)
-
-    # Snapshot the output path's state *before* invoking ffmpeg. For an
-    # owned (auto-generated) path this is always "exists, empty" --
-    # `_new_temp_wav_path()` just created it via `mkstemp`. For a
-    # caller-supplied path it may already exist with real content (the
-    # caller reusing a path across calls, say), which is exactly the case
-    # an exists()/size-only check after the fact can't distinguish from a
-    # genuine ffmpeg write -- ffmpeg exiting 0 without touching a
-    # pre-existing non-empty file would otherwise look identical to
-    # success.
-    pre_run_stat = resolved_output.stat() if resolved_output.exists() else None
+    # ffmpeg always writes to a fresh, auto-generated temp path -- never
+    # directly to a caller-supplied output_path, even when one is given.
+    # This is what lets "did ffmpeg actually write output?" be answered
+    # structurally (does the temp file it exclusively owns exist and have
+    # content?) instead of by comparing filesystem metadata of a path that
+    # might have pre-existing content of its own. A prior revision wrote
+    # straight to output_path and inferred success by snapshotting
+    # size/mtime before and after the run; that broke on a genuine retry
+    # against the same output_path, since ffmpeg is deterministic and a
+    # fast re-run can produce a byte-identical file whose mtime quantizes
+    # to the same tick as the stale one on coarse-granularity filesystems
+    # (FAT32/exFAT's ~2s resolution), making a real success indistinguishable
+    # from a no-op (PR #85 review).
+    temp_output = _new_temp_wav_path()
 
     try:
         result = subprocess.run(
@@ -120,7 +128,7 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
                 str(SAMPLE_RATE_HZ),
                 "-f",
                 "wav",
-                str(resolved_output),
+                str(temp_output),
             ],
             capture_output=True,
             text=True,
@@ -130,81 +138,53 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
         # Race: shutil.which() found it, but it's gone (or unexecutable) by
         # the time subprocess actually tries to run it (mirrors T009's
         # identical guard around ffprobe). Don't leak the empty temp file
-        # `_new_temp_wav_path()` created before we ever got here.
-        _cleanup_owned_file(resolved_output, owns_output_file)
+        # `_new_temp_wav_path()` created before we ever got here. The
+        # caller's output_path (if any) was never touched, so there's
+        # nothing to restore there.
+        temp_output.unlink(missing_ok=True)
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE) from exc
 
     if result.returncode != 0:
         # Don't leak a partial/empty temp file for a run the caller never
-        # gets a usable AudioTrack for.
-        _cleanup_owned_file(resolved_output, owns_output_file)
+        # gets a usable AudioTrack for. Same as above, output_path is
+        # untouched.
+        temp_output.unlink(missing_ok=True)
         raise AudioExtractionError(video.path, stderr=result.stderr)
 
-    post_run_stat = resolved_output.stat() if resolved_output.exists() else None
-
-    if post_run_stat is None or post_run_stat.st_size == 0:
+    if not temp_output.exists() or temp_output.stat().st_size == 0:
         # Belt-and-braces: ffmpeg exited 0 but didn't actually write (a
-        # non-empty) output file. Fail clearly here rather than returning
-        # an AudioTrack pointing at a missing/stale file and pushing a
-        # confusing failure downstream into transcription (FR-007).
-        _cleanup_owned_file(resolved_output, owns_output_file)
+        # non-empty) output file. Fail clearly here rather than moving a
+        # missing/empty file onto output_path and pushing a confusing
+        # failure downstream into transcription (FR-007). Because ffmpeg
+        # only ever writes to temp_output, this check alone is sufficient
+        # -- there is no pre-existing content at temp_output to confuse it
+        # with, unlike when ffmpeg wrote directly to a caller-supplied path.
+        temp_output.unlink(missing_ok=True)
         raise AudioExtractionError(
             video.path,
             stderr="ffmpeg exited successfully but produced no output audio file",
         )
 
-    if _looks_unmodified(pre_run_stat, post_run_stat):
-        # ffmpeg exited 0 and *a* non-empty file sits at resolved_output --
-        # but it's the same file (same size, same mtime) that was already
-        # there before this call ran. That only happens for a
-        # caller-supplied output_path pointing at a pre-existing,
-        # non-empty file: an auto-generated path always starts out empty
-        # (mkstemp), so any non-empty result there necessarily means
-        # ffmpeg wrote it. Don't return an AudioTrack pointing at stale
-        # bytes ffmpeg never touched.
-        _cleanup_owned_file(resolved_output, owns_output_file)
-        raise AudioExtractionError(
-            video.path,
-            stderr=(
-                "ffmpeg exited successfully but did not modify the "
-                "pre-existing output file"
-            ),
-        )
+    if output_path is None:
+        resolved_output = temp_output
+    else:
+        # ffmpeg is confirmed to have succeeded and written non-empty
+        # content to temp_output -- only now do we touch the caller's
+        # path, replacing whatever (if anything) was already there.
+        # shutil.move (rather than Path.replace/os.replace) handles the
+        # temp directory and output_path living on different filesystems
+        # or drives, and still overwrites an existing destination file on
+        # every platform this project targets (it falls back to a
+        # copy+unlink when a same-filesystem rename isn't possible or
+        # would fail because the destination already exists).
+        resolved_output = Path(output_path)
+        shutil.move(str(temp_output), str(resolved_output))
 
     return AudioTrack(
         source_video=video,
         extracted_path=resolved_output,
         sample_rate_hz=SAMPLE_RATE_HZ,
     )
-
-
-def _looks_unmodified(pre_run_stat: os.stat_result | None, post_run_stat: os.stat_result) -> bool:
-    """Whether `post_run_stat` shows no evidence ffmpeg actually wrote the file.
-
-    Only meaningful when the path already existed (with content) before
-    ffmpeg ran: `pre_run_stat` is `None` for a path that didn't exist yet,
-    which is never "unmodified" -- any file appearing there is new.
-    Compares both size and mtime (not size alone) since an ffmpeg run
-    that rewrites a file with content of the same length would otherwise
-    look untouched.
-    """
-    if pre_run_stat is None or pre_run_stat.st_size == 0:
-        return False
-    return (
-        post_run_stat.st_size == pre_run_stat.st_size
-        and post_run_stat.st_mtime_ns == pre_run_stat.st_mtime_ns
-    )
-
-
-def _cleanup_owned_file(path: Path, owns_file: bool) -> None:
-    """Delete `path` if (and only if) this call created it itself.
-
-    A caller-supplied `output_path` is the caller's own file to manage --
-    extraction only ever deletes temp files it created via
-    `_new_temp_wav_path()`, never a path the caller passed in.
-    """
-    if owns_file:
-        path.unlink(missing_ok=True)
 
 
 def _new_temp_wav_path() -> Path:
