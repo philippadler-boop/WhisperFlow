@@ -29,7 +29,7 @@ jobs:
       - name: Run Claude Code (developer agent, unattended)
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY_DEV }}
 
           prompt: |
             Implement GitHub issue #${{ github.event.issue.number }}
