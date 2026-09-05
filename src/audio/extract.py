@@ -94,7 +94,11 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
         AudioExtractionError: `ffmpeg` ran but exited non-zero (e.g. a
             corrupt stream, or a video with no audio stream to extract),
             or exited zero without actually writing a non-empty output
-            file.
+            file, or (when `output_path` is given) the confirmed-good
+            temp file could not be moved onto it (disk full, a
+            permission/lock error, or an unrecoverable cross-device
+            move) -- never a raw `OSError`/`shutil.Error` (PR #85
+            review).
     """
     if shutil.which(FFMPEG_EXECUTABLE) is None:
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE)
@@ -171,14 +175,22 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
         # ffmpeg is confirmed to have succeeded and written non-empty
         # content to temp_output -- only now do we touch the caller's
         # path, replacing whatever (if anything) was already there.
-        # shutil.move (rather than Path.replace/os.replace) handles the
-        # temp directory and output_path living on different filesystems
-        # or drives, and still overwrites an existing destination file on
-        # every platform this project targets (it falls back to a
-        # copy+unlink when a same-filesystem rename isn't possible or
-        # would fail because the destination already exists).
         resolved_output = Path(output_path)
-        shutil.move(str(temp_output), str(resolved_output))
+        try:
+            _finalize_output(temp_output, resolved_output)
+        except OSError as exc:
+            # PR #85 review: a failure here (disk full, a permission/lock
+            # error, a genuinely cross-device move that even the fallback
+            # below can't complete) must not leak a raw OSError/
+            # shutil.Error -- that breaks this function's documented
+            # Raises: contract -- and must not leave temp_output behind:
+            # every other exit point in this function already cleans it
+            # up, and this was the one path that didn't.
+            temp_output.unlink(missing_ok=True)
+            raise AudioExtractionError(
+                video.path,
+                stderr=f"failed to move extracted audio to '{resolved_output}': {exc}",
+            ) from exc
 
     return AudioTrack(
         source_video=video,
@@ -187,14 +199,74 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
     )
 
 
-def _new_temp_wav_path() -> Path:
+def _finalize_output(temp_output: Path, resolved_output: Path) -> None:
+    """Move `temp_output` onto `resolved_output`, replacing it if present.
+
+    Prefers `os.replace` over `shutil.move` (which `extract_audio` used
+    previously). `shutil.move` attempts `os.rename` first, and `os.rename`
+    *never* overwrites an existing destination on Windows -- so whenever
+    `resolved_output` already exists, `shutil.move` unconditionally falls
+    back to a `copy2`-based copy+unlink, even when both paths are on the
+    same volume. That fallback's `copy2` opens `resolved_output` with
+    `'wb'`, truncating it immediately, before any new bytes are written --
+    if the copy is then interrupted (disk full, a permission/lock error),
+    the caller's previously-good file is left corrupted/truncated rather
+    than untouched (PR #85 review). `os.replace`, unlike `os.rename`,
+    overwrites atomically on *both* platforms as long as source and
+    destination share a filesystem, which is the overwhelmingly common
+    case here -- so preferring it removes the truncation risk entirely for
+    that case, with no fallback needed.
+
+    Only falls back to a copy when `os.replace` raises `OSError` (e.g. a
+    genuine cross-device/cross-drive move) -- and even then, copies into a
+    *fresh* temp file created in `resolved_output`'s own directory (so it's
+    guaranteed to share its filesystem), rather than opening
+    `resolved_output` itself for writing. The concluding step is still an
+    atomic same-filesystem `os.replace`, not a truncating in-place copy, so
+    a pre-existing `resolved_output` is never at risk of being left
+    partially overwritten. (Python's stdlib has no atomic *cross*-filesystem
+    replace; a copy of some kind is unavoidable in that case. This narrows
+    the truncation risk to "the fallback's own fresh staging file", which
+    carries no data worth protecting, rather than the caller's file.)
+
+    Consumes `temp_output` on success (it no longer exists afterwards,
+    mirroring `shutil.move`'s contract). Never partially consumes it on
+    failure -- raises with `temp_output` still present, left for the
+    caller to clean up.
+    """
+    try:
+        os.replace(temp_output, resolved_output)
+        return
+    except OSError:
+        pass  # Fall through to the staged-copy fallback below.
+
+    staged = _new_temp_wav_path(directory=resolved_output.parent)
+    try:
+        shutil.copy2(temp_output, staged)
+        os.replace(staged, resolved_output)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    temp_output.unlink(missing_ok=True)
+
+
+def _new_temp_wav_path(directory: Path | str | None = None) -> Path:
     """Create and return the path to a fresh, empty temporary `.wav` file.
 
     Uses `tempfile.mkstemp` (rather than `NamedTemporaryFile`) so the file
     is created but not held open -- `ffmpeg` (a separate process) needs to
     open and write it itself, which isn't possible while this process
     holds an exclusive handle on some platforms (notably Windows).
+
+    Args:
+        directory: If given, create the file inside this directory instead
+            of the platform's default temp directory. Used by
+            `_finalize_output`'s cross-filesystem fallback to stage a copy
+            in the same directory as the final destination, guaranteeing
+            the concluding `os.replace` is same-filesystem (and therefore
+            atomic, and therefore non-truncating) even when the
+            ffmpeg-owned temp file itself isn't.
     """
-    fd, name = tempfile.mkstemp(suffix=".wav", prefix="whisperflow_")
+    fd, name = tempfile.mkstemp(suffix=".wav", prefix="whisperflow_", dir=directory)
     os.close(fd)
     return Path(name)

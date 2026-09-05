@@ -11,6 +11,8 @@ videos.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -345,6 +347,121 @@ class TestExtractAudioMocked:
         assert track.extracted_path == desired_output
         assert desired_output.read_bytes() == new_content
         assert desired_output.read_bytes() != stale_content
+
+    def test_move_failure_raises_audio_extraction_error_and_cleans_up_temp_files(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # PR #85 review (second pass): a failure moving the confirmed-good
+        # temp file onto output_path -- disk full, a permission/lock error,
+        # or (as simulated here) an unrecoverable cross-device move that
+        # even the same-directory staged-copy fallback can't complete --
+        # must surface as AudioExtractionError, not a raw OSError/
+        # shutil.Error escaping extract_audio()'s documented Raises:
+        # contract, and must not leave any owned temp file behind.
+        import audio.extract as extract_module
+
+        video = _video(tmp_path)
+        desired_output = tmp_path / "audio.wav"
+        original_content = b"PRE-EXISTING-AUDIO-BYTES"
+        desired_output.write_bytes(original_content)
+        monkeypatch.setattr(subprocess, "run", _fake_ffmpeg_run())
+
+        def _raise_disk_full(*args, **kwargs):
+            raise OSError("simulated disk full")
+
+        monkeypatch.setattr(os, "replace", _raise_disk_full)
+
+        created_paths: list[Path] = []
+        original_new_temp_wav_path = extract_module._new_temp_wav_path
+
+        def _capturing_new_temp_wav_path(directory=None) -> Path:
+            path = original_new_temp_wav_path(directory=directory)
+            created_paths.append(path)
+            return path
+
+        monkeypatch.setattr(
+            extract_module, "_new_temp_wav_path", _capturing_new_temp_wav_path
+        )
+
+        with pytest.raises(AudioExtractionError) as exc_info:
+            extract_audio(video, output_path=desired_output)
+
+        assert not isinstance(exc_info.value, OSError)
+        assert str(desired_output) in str(exc_info.value)
+
+        # Every owned temp file (ffmpeg's own temp_output, and the fallback's
+        # same-directory staged copy) must be cleaned up -- this was the one
+        # exit point that previously skipped that discipline.
+        assert created_paths, "no temp file was ever created"
+        for path in created_paths:
+            assert not path.exists(), f"leftover temp file: {path}"
+
+        # And -- unlike shutil.move's copy2 fallback, which opens the
+        # existing destination with 'wb' and truncates it before copying
+        # in the new bytes -- the pre-existing destination must survive
+        # completely untouched, since the new implementation only ever
+        # copies into a *fresh* staged file, never into resolved_output
+        # directly.
+        assert desired_output.read_bytes() == original_content
+
+    def test_move_failure_during_fallback_copy_leaves_existing_output_untouched(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # Distinct failure point from the test above: os.replace fails
+        # (forcing the staged-copy fallback), and then the fallback's own
+        # copy step (shutil.copy2) is what fails -- e.g. disk full mid-copy.
+        # Confirms the destination is still never at risk, because copy2
+        # only ever writes into the fallback's own fresh staged file.
+        video = _video(tmp_path)
+        desired_output = tmp_path / "audio.wav"
+        original_content = b"PRE-EXISTING-AUDIO-BYTES"
+        desired_output.write_bytes(original_content)
+        monkeypatch.setattr(subprocess, "run", _fake_ffmpeg_run())
+
+        def _raise_cross_device(*args, **kwargs):
+            raise OSError("simulated cross-device move")
+
+        def _raise_disk_full_during_copy(*args, **kwargs):
+            raise OSError("simulated disk full during copy")
+
+        monkeypatch.setattr(os, "replace", _raise_cross_device)
+        monkeypatch.setattr(shutil, "copy2", _raise_disk_full_during_copy)
+
+        with pytest.raises(AudioExtractionError) as exc_info:
+            extract_audio(video, output_path=desired_output)
+
+        assert not isinstance(exc_info.value, OSError)
+        assert desired_output.read_bytes() == original_content
+
+    def test_cross_device_move_falls_back_to_staged_copy_and_succeeds(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # A genuinely cross-device move (os.replace raising once, e.g.
+        # temp_output and output_path on different filesystems/drives)
+        # must not fail extraction outright -- it should fall back to
+        # staging a copy in output_path's own directory and completing
+        # with a same-filesystem os.replace.
+        video = _video(tmp_path)
+        desired_output = tmp_path / "audio.wav"
+        monkeypatch.setattr(subprocess, "run", _fake_ffmpeg_run())
+
+        real_os_replace = os.replace
+        call_count = {"n": 0}
+
+        def _flaky_replace(src, dst, *args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise OSError("simulated cross-device move")
+            return real_os_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", _flaky_replace)
+
+        track = extract_audio(video, output_path=desired_output)
+
+        assert track.extracted_path == desired_output
+        assert desired_output.exists()
+        assert desired_output.read_bytes() == b"RIFF....WAVEfmt "
+        assert call_count["n"] == 2
 
     def test_no_audio_track_video_surfaces_as_extraction_error(
         self, monkeypatch, tmp_path: Path
