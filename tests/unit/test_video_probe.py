@@ -300,6 +300,30 @@ class TestProbeVideoMocked:
             probe_video(video_path)
         assert exc_info.value.detected_format is None
 
+    def test_literal_mkv_format_name_token_is_rejected(self, monkeypatch, tmp_path: Path):
+        # ffprobe's format_name for a *real* .mkv file is always
+        # "matroska,webm" -- never the literal string "mkv" --
+        # so `_FORMAT_NAME_TOKENS["mkv"]`'s known tokens are
+        # {"matroska", "webm"}, not {"mkv"} itself. A format_name whose
+        # first (and only) token literally is "mkv" therefore matches no
+        # _FORMAT_NAME_TOKENS family and falls through to the primary_token
+        # branch, which must not return it unchecked just because "mkv"
+        # itself happens to be a SUPPORTED_VIDEO_FORMATS entry -- ffprobe
+        # never actually reported anything matroska-related. The .mp4
+        # extension gives no rescuing signal either, since "mp4" also
+        # collides with SUPPORTED_VIDEO_FORMATS.
+        video_path = tmp_path / "clip.mp4"
+        video_path.touch()
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **k: _ffprobe_result(format_name="mkv"),
+        )
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+        assert exc_info.value.detected_format is None
+
     @pytest.mark.parametrize("extension", ["m4a", "3g2", "mj2"])
     def test_mp4_mov_family_siblings_are_rejected(
         self, monkeypatch, tmp_path: Path, extension: str

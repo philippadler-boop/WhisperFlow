@@ -219,18 +219,27 @@ def _detect_container_format(video_path: Path, probe_data: dict[str, Any]) -> st
         return extension if extension and extension not in SUPPORTED_VIDEO_FORMATS else None
 
     primary_token = format_name.split(",")[0].strip().lower()
-    if primary_token:
+    if primary_token and primary_token not in SUPPORTED_VIDEO_FORMATS:
         # A genuine (if unrecognized) ffprobe token, e.g. "avi" -- safe to
-        # return as-is for the caller's error message: since it didn't
-        # intersect any _FORMAT_NAME_TOKENS family above, it can't collide
-        # with a SUPPORTED_VIDEO_FORMATS value (every token that maps to one
-        # is enumerated there).
+        # return as-is for the caller's error message. Note this *can*
+        # collide with a SUPPORTED_VIDEO_FORMATS value despite not matching
+        # any _FORMAT_NAME_TOKENS family above: `_FORMAT_NAME_TOKENS["mkv"]`'s
+        # known tokens are `{"matroska", "webm"}`, not `{"mkv"}` itself, so a
+        # format_name whose first token is literally "mkv" reaches here
+        # unmatched. Guard against that the same way the branches above do --
+        # fall through to the extension-based fallback below rather than
+        # accepting an ffprobe token that happens to spell a supported
+        # format's name without ffprobe actually having identified that
+        # container.
         return primary_token
 
-    # format_name was missing or empty -- ffprobe gave zero corroboration,
-    # genuine or otherwise, about the container. Falling back to the file
-    # extension here unconditionally would repeat the exact defect class
-    # just fixed above (an ambiguous/absent ffprobe signal letting the
+    # Reached with zero usable ffprobe corroboration about the container:
+    # either format_name was missing/empty outright, or its primary token
+    # was guarded out just above because it collided with a
+    # SUPPORTED_VIDEO_FORMATS value (e.g. a literal "mkv" token) despite
+    # ffprobe never actually reporting a matching family. Falling back to
+    # the file extension here unconditionally would repeat the exact defect
+    # class just fixed above (an ambiguous/absent ffprobe signal letting the
     # extension alone confer a SUPPORTED_VIDEO_FORMATS value, e.g. a
     # `clip.mp4` with unreadable/empty format_name being silently accepted
     # as "mp4"). Use the same guard as the ambiguous-match branch: the
