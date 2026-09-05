@@ -18,7 +18,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-import pytest
 from typer.testing import CliRunner
 
 from cli.main import ModelSize, app
@@ -48,20 +47,6 @@ def _normalize(text: str) -> str:
     no_ansi = _ANSI_RE.sub("", text)
     no_box = _BOX_CHARS_RE.sub(" ", no_ansi)
     return _WS_RE.sub(" ", no_box).strip()
-
-
-@pytest.fixture
-def captured_pipeline_call(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Stub `_run_pipeline` and capture the resolved kwargs it receives.
-
-    Lets these tests drive the real Typer `app`/parsing/defaulting code
-    path end to end without hitting the not-yet-implemented pipeline.
-    """
-    import cli.main as main_module
-
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(main_module, "_run_pipeline", lambda **kwargs: captured.update(kwargs))
-    return captured
 
 
 # --- Command: "whisperflow transcribe VIDEO_PATH [OPTIONS]" -----------------
@@ -155,7 +140,8 @@ def test_help_documents_model_option_choices_and_default(cli_runner: CliRunner) 
     assert "--model" in output
     assert "<tiny|base|small|medium|large>" in output
     assert (
-        "faster-whisper model size -- smaller is faster, larger is more accurate." in output
+        "faster-whisper model size -- smaller is faster, larger is more accurate "
+        "(research.md)." in output
     )
     assert "[default: base]" in output
 
@@ -193,7 +179,7 @@ def test_help_documents_review_option_and_default(cli_runner: CliRunner) -> None
     assert (
         "With --review (default), after generating a draft .srt the command "
         "opens it in $EDITOR (or --editor) and waits for confirmation before "
-        "finalizing (FR-009, FR-010)." in output
+        "finalizing (FR-009, FR-010, User Story 2)." in output
     )
     assert "--no-review finalizes immediately, for scripting/automation." in output
     assert "[default: review]" in output
