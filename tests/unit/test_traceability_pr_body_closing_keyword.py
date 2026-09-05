@@ -134,10 +134,10 @@ def test_unset_pr_body_does_not_error():
 @pytest.mark.parametrize(
     "make_payload",
     [
-        lambda marker: f"Closes #75\n$(touch {marker})",
-        lambda marker: f"Closes #75; touch {marker}",
-        lambda marker: f"Closes #75 `touch {marker}`",
-        lambda marker: f'Closes #75"; touch {marker}; echo "',
+        lambda marker: f"Closes #75\n$(touch {marker.as_posix()})",
+        lambda marker: f"Closes #75; touch {marker.as_posix()}",
+        lambda marker: f"Closes #75 `touch {marker.as_posix()}`",
+        lambda marker: f'Closes #75"; touch {marker.as_posix()}; echo "',
     ],
     ids=[
         "command-substitution",
@@ -164,7 +164,7 @@ def test_adversarial_shell_metacharacters_in_pr_body_are_never_executed(
 def test_adversarial_rm_payload_in_pr_body_does_not_delete_existing_file(tmp_path):
     victim = tmp_path / "pwned_target"
     victim.write_text("do not delete")
-    body = f"Closes #75; rm -rf {victim}"
+    body = f"Closes #75; rm -rf {victim.as_posix()}"
 
     result = _run(body)
 
