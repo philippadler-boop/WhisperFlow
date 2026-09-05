@@ -89,7 +89,11 @@ def probe_video(path: Path | str) -> Video:
 
     duration_seconds = _detect_duration_seconds(probe_data)
     if duration_seconds is None:
-        raise UnsupportedVideoFormatError(video_path, detected_format=container_format)
+        # container_format is already validated at this point -- passing it
+        # here would produce a self-contradictory "unsupported format 'mp4'"
+        # message about a format that *is* supported. The real failure is an
+        # undetectable duration field, not the container format.
+        raise UnsupportedVideoFormatError(video_path, detected_format=None)
     if duration_seconds > MAX_DURATION_SECONDS:
         raise MaxDurationExceededError(duration_seconds)
 
@@ -157,6 +161,13 @@ def _detect_container_format(video_path: Path, probe_data: dict[str, Any]) -> st
     detection -- e.g. an AVI file renamed to `.mp4` is still reported (and
     rejected) as AVI, not silently accepted as MP4.
 
+    The same shared demuxers also cover *unsupported* sibling formats
+    (`.webm` alongside `.mkv`'s matroska demuxer; `.m4a`/`.3gp`/`.3g2`/
+    `.mj2` alongside `.mp4`/`.mov`'s demuxer) that ffprobe's tokens alone
+    can't distinguish from a genuinely supported one. When the extension
+    identifies one of those unsupported siblings, it is never guessed into
+    a supported label -- see the `family_tokens` check below.
+
     Returns ffprobe's own best guess at the real format (its `format_name`
     tokens' first entry, or the file extension as a last resort) when it
     doesn't match any supported family, so callers can still report *what*
@@ -174,10 +185,32 @@ def _detect_container_format(video_path: Path, probe_data: dict[str, Any]) -> st
         extension = video_path.suffix.lower().lstrip(".")
         if extension in matched_supported:
             return extension
-        # Ambiguous within a shared demuxer and the extension doesn't help
-        # disambiguate -- deterministically pick one; ffprobe still
-        # confirms the file *is* one of our supported containers either way.
-        return sorted(matched_supported)[0]
+        family_tokens: set[str] = set().union(
+            *(_FORMAT_NAME_TOKENS[supported_format] for supported_format in matched_supported)
+        )
+        if extension in family_tokens:
+            # The extension identifies a specific sibling within this
+            # shared demuxer family that ffprobe's own tokens can't tell
+            # apart from a supported one -- e.g. a real .webm file reports
+            # the same "matroska,webm" format_name as a real .mkv file, and
+            # a real .m4a/.3gp/.3g2/.mj2 file reports the same tokens as
+            # mp4/mov. That sibling isn't itself one of
+            # SUPPORTED_VIDEO_FORMATS, so return it as-is rather than
+            # guessing a supported label -- it's expected to fail the
+            # caller's SUPPORTED_VIDEO_FORMATS check.
+            return extension
+        if len(matched_supported) == 1:
+            # No extension-based signal either way (the extension is
+            # unrelated to this family entirely, e.g. a real .mkv file
+            # renamed to .mp4) -- trust ffprobe's own token detection,
+            # since it unambiguously identifies exactly one supported
+            # family (data-model.md: container_format is "detected from
+            # the file", not the extension).
+            return next(iter(matched_supported))
+        # Genuinely ambiguous within a shared demuxer (e.g. mp4 vs mov) and
+        # the extension gives no signal to resolve it either way -- don't
+        # guess.
+        return extension or None
 
     primary_token = format_name.split(",")[0].strip().lower()
     return primary_token or video_path.suffix.lower().lstrip(".") or None

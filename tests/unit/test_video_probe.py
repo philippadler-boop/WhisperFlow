@@ -191,8 +191,44 @@ class TestProbeVideoMocked:
             lambda *a, **k: _ffprobe_result(duration=None),
         )
 
-        with pytest.raises(UnsupportedVideoFormatError):
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
             probe_video(video_path)
+        # The container format is already validated as supported (mp4) by
+        # this point -- the real failure is an undetectable duration, so
+        # detected_format must not echo back the (valid) container format,
+        # which would produce a self-contradictory "unsupported format
+        # 'mp4'" message.
+        assert exc_info.value.detected_format is None
+
+    def test_webm_extension_and_matroska_demuxer_is_rejected(self, monkeypatch, tmp_path: Path):
+        # A real .webm file reports the same "matroska,webm" format_name as
+        # a real .mkv file -- ffprobe's tokens alone can't tell them apart.
+        # webm isn't in SUPPORTED_VIDEO_FORMATS, so it must not be guessed
+        # into "mkv" just because they share a demuxer.
+        video_path = tmp_path / "clip.webm"
+        video_path.touch()
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **k: _ffprobe_result(format_name="matroska,webm"),
+        )
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+        assert exc_info.value.detected_format == "webm"
+
+    def test_3gp_extension_and_shared_mp4_demuxer_is_rejected(self, monkeypatch, tmp_path: Path):
+        # A real .3gp file reports the same shared demuxer tokens as
+        # mp4/mov ("mov,mp4,m4a,3gp,3g2,mj2"). 3gp isn't in
+        # SUPPORTED_VIDEO_FORMATS, so it must not be guessed into "mov" (or
+        # "mp4") just because they share a demuxer.
+        video_path = tmp_path / "clip.3gp"
+        video_path.touch()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _ffprobe_result())
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+        assert exc_info.value.detected_format == "3gp"
 
     def test_oversized_video_raises_max_duration_exceeded(self, monkeypatch, tmp_path: Path):
         video_path = tmp_path / "clip.mp4"
