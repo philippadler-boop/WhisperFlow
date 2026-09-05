@@ -110,7 +110,7 @@ class TestExtractAudioMocked:
 
         def _run(args, **kwargs):
             captured_args.extend(args)
-            Path(args[-1]).write_bytes(b"")
+            Path(args[-1]).write_bytes(b"RIFF....WAVEfmt ")
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(subprocess, "run", _run)
@@ -124,6 +124,9 @@ class TestExtractAudioMocked:
         assert captured_args[captured_args.index("-ac") + 1] == str(AUDIO_CHANNELS)
         assert "-ar" in captured_args
         assert captured_args[captured_args.index("-ar") + 1] == str(SAMPLE_RATE_HZ)
+        assert "-f" in captured_args
+        assert captured_args[captured_args.index("-f") + 1] == "wav"
+        assert "-y" in captured_args
 
     def test_ffmpeg_failure_raises_audio_extraction_error(self, monkeypatch, tmp_path: Path):
         video = _video(tmp_path)
@@ -195,6 +198,87 @@ class TestExtractAudioMocked:
 
         with pytest.raises(FfmpegNotFoundError):
             extract_audio(video)
+
+    def test_ffmpeg_disappearing_at_call_time_cleans_up_owned_temp_file(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # `resolved_output = _new_temp_wav_path()` creates an empty file on
+        # disk (via mkstemp) *before* subprocess.run ever runs -- if ffmpeg
+        # disappears mid-call (the same race the test above exercises),
+        # that owned temp file must not be left behind in the OS temp
+        # directory.
+        video = _video(tmp_path)
+        created_paths: list[Path] = []
+
+        import audio.extract as extract_module
+
+        original_new_temp_wav_path = extract_module._new_temp_wav_path
+
+        def _capturing_new_temp_wav_path() -> Path:
+            path = original_new_temp_wav_path()
+            created_paths.append(path)
+            return path
+
+        monkeypatch.setattr(extract_module, "_new_temp_wav_path", _capturing_new_temp_wav_path)
+
+        def _raise_file_not_found(*args, **kwargs):
+            raise FileNotFoundError("ffmpeg")
+
+        monkeypatch.setattr(subprocess, "run", _raise_file_not_found)
+
+        with pytest.raises(FfmpegNotFoundError):
+            extract_audio(video)
+
+        assert created_paths, "temp path was never created"
+        assert not created_paths[0].exists()
+
+    def test_ffmpeg_success_without_writing_output_raises_extraction_error(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # If ffmpeg ever exits 0 without writing an output file, extraction
+        # must fail clearly here rather than returning an AudioTrack that
+        # points at a missing file (FR-007).
+        video = _video(tmp_path)
+        monkeypatch.setattr(subprocess, "run", _fake_ffmpeg_run(returncode=0, write_output=False))
+
+        with pytest.raises(AudioExtractionError):
+            extract_audio(video)
+
+    def test_ffmpeg_success_with_empty_output_raises_extraction_error(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # An output file that exists but is zero-length is just as unusable
+        # as a missing one.
+        video = _video(tmp_path)
+
+        def _run(args, **kwargs):
+            Path(args[-1]).write_bytes(b"")
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+
+        with pytest.raises(AudioExtractionError):
+            extract_audio(video)
+
+    def test_ffmpeg_success_without_writing_output_cleans_up_owned_temp_file(
+        self, monkeypatch, tmp_path: Path
+    ):
+        video = _video(tmp_path)
+        created_paths: list[Path] = []
+
+        def _run(args, **kwargs):
+            created_paths.append(Path(args[-1]))
+            # Deliberately does not write to the output path, unlike real
+            # ffmpeg -- simulates ffmpeg exiting 0 without producing output.
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+
+        with pytest.raises(AudioExtractionError):
+            extract_audio(video)
+
+        assert created_paths, "ffmpeg mock was never invoked"
+        assert not created_paths[0].exists()
 
     def test_no_audio_track_video_surfaces_as_extraction_error(
         self, monkeypatch, tmp_path: Path

@@ -81,7 +81,9 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
     Raises:
         FfmpegNotFoundError: `ffmpeg` is not on `PATH` (contracts/cli.md).
         AudioExtractionError: `ffmpeg` ran but exited non-zero (e.g. a
-            corrupt stream, or a video with no audio stream to extract).
+            corrupt stream, or a video with no audio stream to extract),
+            or exited zero without actually writing a non-empty output
+            file.
     """
     if shutil.which(FFMPEG_EXECUTABLE) is None:
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE)
@@ -112,21 +114,44 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
     except FileNotFoundError as exc:
         # Race: shutil.which() found it, but it's gone (or unexecutable) by
         # the time subprocess actually tries to run it (mirrors T009's
-        # identical guard around ffprobe).
+        # identical guard around ffprobe). Don't leak the empty temp file
+        # `_new_temp_wav_path()` created before we ever got here.
+        _cleanup_owned_file(resolved_output, owns_output_file)
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE) from exc
 
     if result.returncode != 0:
-        if owns_output_file:
-            # Don't leak a partial/empty temp file for a run the caller
-            # never gets a usable AudioTrack for.
-            resolved_output.unlink(missing_ok=True)
+        # Don't leak a partial/empty temp file for a run the caller never
+        # gets a usable AudioTrack for.
+        _cleanup_owned_file(resolved_output, owns_output_file)
         raise AudioExtractionError(video.path, stderr=result.stderr)
+
+    if not resolved_output.exists() or resolved_output.stat().st_size == 0:
+        # Belt-and-braces: ffmpeg exited 0 but didn't actually write (a
+        # non-empty) output file. Fail clearly here rather than returning
+        # an AudioTrack pointing at a missing/stale file and pushing a
+        # confusing failure downstream into transcription (FR-007).
+        _cleanup_owned_file(resolved_output, owns_output_file)
+        raise AudioExtractionError(
+            video.path,
+            stderr="ffmpeg exited successfully but produced no output audio file",
+        )
 
     return AudioTrack(
         source_video=video,
         extracted_path=resolved_output,
         sample_rate_hz=SAMPLE_RATE_HZ,
     )
+
+
+def _cleanup_owned_file(path: Path, owns_file: bool) -> None:
+    """Delete `path` if (and only if) this call created it itself.
+
+    A caller-supplied `output_path` is the caller's own file to manage --
+    extraction only ever deletes temp files it created via
+    `_new_temp_wav_path()`, never a path the caller passed in.
+    """
+    if owns_file:
+        path.unlink(missing_ok=True)
 
 
 def _new_temp_wav_path() -> Path:
