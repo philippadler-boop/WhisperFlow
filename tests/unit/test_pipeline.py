@@ -28,6 +28,7 @@ from lib.errors import (
     AudioExtractionError,
     FfmpegNotFoundError,
     ModelLoadError,
+    SubtitleWriteError,
     TranscriptionError,
     UnsupportedVideoFormatError,
 )
@@ -411,13 +412,13 @@ class TestRunPipelineCleanupFailure:
             pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
         )
 
-        def _raise_os_error(transcript_arg, output_path_arg):
-            raise OSError("[Errno 28] No space left on device")
+        def _raise_write_error(transcript_arg, output_path_arg):
+            raise SubtitleWriteError(output_path_arg, reason="No space left on device")
 
-        monkeypatch.setattr(pipeline_module, "write_subtitles", _raise_os_error)
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _raise_write_error)
 
         assert audio_track.extracted_path.exists()
-        with pytest.raises(OSError, match="No space left on device"):
+        with pytest.raises(SubtitleWriteError, match="No space left on device"):
             pipeline_module.run_pipeline(
                 video_path=video.path,
                 output_path=tmp_path / "out.srt",

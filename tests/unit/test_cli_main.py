@@ -27,6 +27,7 @@ from cli.main import ModelSize, _default_editor, _default_output_path, app
 from lib.errors import (
     FfmpegNotFoundError,
     MaxDurationExceededError,
+    SubtitleWriteError,
     UnsupportedVideoFormatError,
 )
 
@@ -251,6 +252,22 @@ class TestErrorReporting:
 
         error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
         assert len(error_lines) == 1
+
+    def test_subtitle_write_failure_is_reported_once(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def _raise(**kwargs):
+            raise SubtitleWriteError(tmp_path / "out.srt", reason="Permission denied")
+
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", _raise)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--no-review"])
+
+        assert result.exit_code == 1
+        error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
+        assert error_lines == [
+            f"Error: failed to write subtitle file to '{tmp_path / 'out.srt'}': Permission denied"
+        ]
 
     def test_ffprobe_launch_failure_reported_clearly_not_as_raw_error(
         self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch

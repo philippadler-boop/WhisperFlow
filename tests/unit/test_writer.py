@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import srt
 
 from audio.video_probe import Video
+from lib.errors import SubtitleWriteError
 from subtitles.models import SubtitleFile
 from subtitles.writer import transcript_to_subtitle_file, write_subtitles
 from transcription.transcribe import Transcript, TranscriptSegment
@@ -99,6 +101,23 @@ class TestTranscriptToSubtitleFile:
 
 
 class TestWriteSubtitles:
+    def test_translates_write_oserror_to_subtitle_write_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        transcript = Transcript(source_video=_video(tmp_path), language="en", segments=[])
+        target = tmp_path / "out.srt"
+
+        def _raise_os_error(self, path=None):
+            raise OSError("[Errno 28] No space left on device")
+
+        monkeypatch.setattr(SubtitleFile, "write", _raise_os_error)
+
+        with pytest.raises(SubtitleWriteError, match="No space left on device") as exc_info:
+            write_subtitles(transcript, target)
+
+        assert exc_info.value.path == target
+        assert isinstance(exc_info.value.__cause__, OSError)
+
     def test_writes_composed_srt_to_output_path(self, tmp_path: Path) -> None:
         video = _video(tmp_path)
         transcript = Transcript(
