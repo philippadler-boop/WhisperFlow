@@ -63,7 +63,7 @@ description: "Task list template for feature implementation"
 - [x] T016 [P] [US1] Integration test: stage/progress lines appear on stderr during processing (quickstart.md Scenario 2) in `tests/integration/test_progress.py`
 - [x] T017 [P] [US1] Integration test: silent/no-speech sample video → exit 0, empty `.srt`, clear stderr notice (quickstart.md Scenario 4) in `tests/integration/test_no_speech.py`
 - [x] T018 [P] [US1] Integration test: unsupported input file and over-2-hour video → exit 1 with a clear error message (quickstart.md Scenarios 5–6) in `tests/integration/test_input_errors.py`
-- [ ] T019 [P] [US1] Unit tests for video probing and audio extraction edge cases (bad format, missing audio track) in `tests/unit/test_audio.py`
+- [x] T019 [P] [US1] Unit tests for video probing and audio extraction edge cases (bad format, missing audio track) in `tests/unit/test_audio.py`
 
 **Checkpoint**: User Story 1 is fully functional and independently testable — this is the MVP
 
