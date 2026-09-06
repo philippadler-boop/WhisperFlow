@@ -81,7 +81,9 @@ def test_clear_speech_video_produces_correct_time_synced_srt(
     shutil.copyfile(clear_speech_video, video_path)
     expected_srt_path = video_path.with_suffix(".srt")
 
-    result = cli_runner.invoke(app, ["transcribe", str(video_path), "--no-review"])
+    result = cli_runner.invoke(
+        app, ["transcribe", str(video_path), "--model", "tiny", "--no-review"]
+    )
 
     if (
         type(result.exception) is NotImplementedError
