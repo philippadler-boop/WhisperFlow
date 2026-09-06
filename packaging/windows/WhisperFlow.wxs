@@ -6,18 +6,19 @@
 
     <StandardDirectory Id="ProgramFilesFolder">
       <Directory Id="INSTALLFOLDER" Name="WhisperFlow">
-        <Component Id="ApplicationFiles" Bitness="always64">
-          <Files Include="$(var.PublishDir)\**" />
-        </Component>
-        <Component Id="PathRegistration" Bitness="always64">
+        <Component Id="PathRegistration" Bitness="always64" Guid="6E6E9C2B-6E36-4C7C-9B0A-6A9B6E9C2B6E">
           <Environment Id="WhisperFlowPath" Name="PATH" Value="[INSTALLFOLDER]"
                        Part="last" Action="set" System="yes" Permanent="no" />
         </Component>
       </Directory>
     </StandardDirectory>
 
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
     <Feature Id="MainFeature" Title="WhisperFlow" Level="1">
-      <ComponentRef Id="ApplicationFiles" />
+      <ComponentGroupRef Id="ApplicationFiles" />
       <ComponentRef Id="PathRegistration" />
     </Feature>
   </Package>
