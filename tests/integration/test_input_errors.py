@@ -89,6 +89,17 @@ def test_overlong_video_fails_with_clear_error(
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         pytest.skip("ffmpeg/ffprobe not installed")
 
+    encoder_result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-encoders"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if encoder_result.returncode != 0 or not any(
+        "libx264" in line.split() for line in encoder_result.stdout.splitlines()
+    ):
+        pytest.skip("ffmpeg libx264 encoder not available")
+
     input_path = tmp_path / "overlong.mp4"
     output_path = tmp_path / "overlong.srt"
     _create_overlong_video(input_path)
