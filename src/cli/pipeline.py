@@ -117,12 +117,14 @@ def run_pipeline(
         # this and would only ever raise AudioExtractionError -- turning a
         # documented-successful outcome into a fatal error -- so skip
         # extraction/transcription entirely and write straight to an empty
-        # subtitle file. `job`/`reporter` still advance through the normal
-        # stage sequence (skipping only the work each stage would have
-        # done), so stderr's stage announcements stay consistent with every
-        # other run.
-        job.advance(Stage.TRANSCRIBING)
-        job.advance(Stage.WRITING_SUBTITLES)
+        # subtitle file. Every stage the job passes through -- including
+        # the ones with nothing to actually do -- is announced via the
+        # reporter itself (rather than advancing `job` directly), so
+        # stderr's stage announcements stay complete and consistent with
+        # every other run instead of silently skipping straight to
+        # "Writing subtitles…" (P2 review).
+        reporter.announce_stage(Stage.EXTRACTING_AUDIO)
+        reporter.announce_stage(Stage.TRANSCRIBING)
         reporter.announce_stage(Stage.WRITING_SUBTITLES)
         empty_transcript = Transcript(source_video=video, language="", segments=[])
         subtitle_file = write_subtitles(empty_transcript, resolved_output_path)
@@ -134,6 +136,13 @@ def run_pipeline(
     audio_track = extract_audio(video)
     temp_audio_path = Path(audio_track.extracted_path)
 
+    # Transcribing and writing are handled under one unified cleanup block:
+    # a failure from *either* stage (ModelLoadError/TranscriptionError, or a
+    # writer failure such as an unwritable directory/full disk) is already
+    # propagating and takes priority -- clean up the temporary WAV
+    # best-effort, but never let a cleanup failure replace or mask the
+    # primary exception with a raw OSError/traceback, and never leave the
+    # temp file behind regardless of which stage failed (P2 review).
     try:
         reporter.announce_stage(Stage.TRANSCRIBING)
         transcript = transcribe_audio(
@@ -141,16 +150,11 @@ def run_pipeline(
             model_size=model_size,
             on_segment=lambda segment: reporter.report_progress(segment.end_seconds),
         )
+        reporter.announce_stage(Stage.WRITING_SUBTITLES)
+        subtitle_file = write_subtitles(transcript, resolved_output_path)
     except BaseException:
-        # A primary failure (ModelLoadError/TranscriptionError, or anything
-        # else) is already propagating and takes priority -- clean up
-        # best-effort, but never let a cleanup failure replace or mask it
-        # with a raw OSError/traceback (P2 review).
         _cleanup_temp_audio(temp_audio_path)
         raise
-
-    reporter.announce_stage(Stage.WRITING_SUBTITLES)
-    subtitle_file = write_subtitles(transcript, resolved_output_path)
 
     # Only attempted once the transcript is safely on disk: a temp-file
     # cleanup failure at this point is this run's only failure, but it

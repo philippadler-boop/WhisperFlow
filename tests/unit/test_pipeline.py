@@ -274,6 +274,13 @@ class TestRunPipelineNoAudioTrack:
         output = stream.getvalue()
         assert pipeline_module.NO_SPEECH_DETECTED_MESSAGE in output
         assert "Done." in output
+        # P2 review: the job silently advanced through ExtractingAudio and
+        # Transcribing without announcing either -- a valid, no-audio-track
+        # video must still announce every stage it passes through, same as
+        # every other run, even though there is no actual work to do in them.
+        assert "Extracting audio…" in output
+        assert "Transcribing…" in output
+        assert "Writing subtitles…" in output
 
     def test_no_audio_track_writes_empty_srt_regardless_of_writer_stub(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -380,6 +387,45 @@ class TestRunPipelineCleanupFailure:
                 model_size="base",
                 stream=io.StringIO(),
             )
+
+    def test_temp_audio_cleaned_up_when_write_subtitles_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """P2 review: `write_subtitles()` ran outside the temp-audio cleanup
+        block entirely -- an unwritable output directory, a full disk, or
+        any other writer failure left the extracted temporary WAV behind,
+        violating `AudioTrack.extracted_path`'s "removed after the run"
+        contract. Writing is now handled under the same unified cleanup as
+        transcription: the temp file must still be removed, and the
+        original writer exception must still be the one that propagates.
+        """
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(
+            video, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="Hi")]
+        )
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
+        )
+
+        def _raise_os_error(transcript_arg, output_path_arg):
+            raise OSError("[Errno 28] No space left on device")
+
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _raise_os_error)
+
+        assert audio_track.extracted_path.exists()
+        with pytest.raises(OSError, match="No space left on device"):
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
+
+        assert not audio_track.extracted_path.exists()
 
 
 class TestRunPipelinePropagatesDomainErrors:
