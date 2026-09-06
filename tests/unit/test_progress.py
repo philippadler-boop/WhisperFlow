@@ -197,3 +197,20 @@ class TestProgressReporter:
         reporter.report_failure("model failed to load")
         lines = stream.getvalue().splitlines()
         assert any(line.strip() == "Error: model failed to load" for line in lines)
+
+    def test_report_notice_writes_message_without_changing_stage(self):
+        job, stream, reporter = self._make()
+        reporter.announce_stage(Stage.EXTRACTING_AUDIO)
+        reporter.report_notice("No speech detected in 'clip.mp4'.")
+        assert job.stage is Stage.EXTRACTING_AUDIO
+        assert not job.is_terminal
+        assert "No speech detected in 'clip.mp4'." in stream.getvalue()
+
+    def test_report_notice_closes_open_percent_line_first(self):
+        job, stream, reporter = self._make(duration=100.0)
+        reporter.announce_stage(Stage.EXTRACTING_AUDIO)
+        reporter.announce_stage(Stage.TRANSCRIBING)
+        reporter.report_progress(50.0)
+        reporter.report_notice("No speech detected.")
+        lines = stream.getvalue().splitlines()
+        assert any(line.strip() == "No speech detected." for line in lines)

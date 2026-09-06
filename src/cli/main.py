@@ -1,15 +1,20 @@
-"""WhisperFlow CLI entrypoint (T007).
+"""WhisperFlow CLI entrypoint (T007, T014).
 
 Implements the argument/option surface of the single user-facing command,
 ``whisperflow transcribe VIDEO_PATH [OPTIONS]``, exactly as documented in
 ``specs/001-video-subtitle-generator/contracts/cli.md`` (spec FR-005).
 
-This module is a *skeleton*: option parsing, defaulting, and validation
-are fully wired up, but the actual pipeline (probe -> extract -> transcribe
--> write -> optional review) is not implemented yet. Once parsed, the
-resolved options are handed to ``_run_pipeline``, a placeholder that a
-later task (T013/T014, ``src/cli/pipeline.py``) will replace with the real
-orchestration call.
+``_run_pipeline`` wires the ``--no-review`` command path to T013's real
+orchestration (``cli.pipeline.run_pipeline``): probe -> extract ->
+transcribe -> write. ``--review`` (the default) is not implemented yet --
+that's T020/T021's job (the interactive review step and its branching) --
+so it still raises ``NotImplementedError`` for now. Every domain error
+T013's stages can raise (``lib.errors.WhisperFlowError`` and its
+subclasses -- unsupported video format, oversized video, missing
+``ffmpeg``/``ffprobe``, or a failed ASR model load/transcription) is
+caught exactly once here, at the top level, and reported as contracts/
+cli.md's Exit codes section requires: a single ``Error: ...`` line on
+stderr, exit code 1 (spec FR-007).
 """
 
 from __future__ import annotations
@@ -19,6 +24,9 @@ from enum import StrEnum
 from pathlib import Path
 
 import typer
+
+from cli import pipeline
+from lib.errors import WhisperFlowError
 
 app = typer.Typer(
     name="whisperflow",
@@ -73,15 +81,24 @@ def _run_pipeline(
     review: bool,
     editor: str | None,
 ) -> None:
-    """Placeholder for the not-yet-implemented processing pipeline.
+    """Dispatch to T013's real pipeline for the ``--no-review`` path (T014).
 
-    T013 (``src/cli/pipeline.py``) implements the real probe -> extract ->
-    transcribe -> write orchestration, and T014/T021 wire it in here in
-    place of this stub. Until then, invoking ``transcribe`` fails loudly
-    rather than silently doing nothing.
+    ``--review`` (``review=True``, the contract default) still has no
+    implementation to dispatch to -- T020 (the interactive review flow) and
+    T021 (wiring it in here) haven't landed yet -- so it keeps failing
+    loudly with ``NotImplementedError`` rather than silently skipping the
+    review step it was asked for. ``editor`` is accordingly unused until
+    then; it's already threaded through so T021 only has to change this
+    function's body, not its (or ``transcribe``'s) signature.
     """
-    raise NotImplementedError(
-        "whisperflow transcribe: pipeline not yet implemented (see T013/T014)"
+    if review:
+        raise NotImplementedError(
+            "whisperflow transcribe --review: pipeline not yet implemented (see T020/T021)"
+        )
+    pipeline.run_pipeline(
+        video_path=video_path,
+        output_path=output_path,
+        model_size=model.value,
     )
 
 
@@ -132,13 +149,22 @@ def transcribe(
     resolved_output = output if output is not None else _default_output_path(video_path)
     resolved_editor = editor if editor is not None else _default_editor()
 
-    _run_pipeline(
-        video_path=video_path,
-        output_path=resolved_output,
-        model=model,
-        review=review,
-        editor=resolved_editor,
-    )
+    try:
+        _run_pipeline(
+            video_path=video_path,
+            output_path=resolved_output,
+            model=model,
+            review=review,
+            editor=resolved_editor,
+        )
+    except WhisperFlowError as exc:
+        # contracts/cli.md's Exit codes section: every FR-007 fatal error
+        # (unsupported/corrupt format, oversized video, missing ffmpeg, a
+        # failed ASR model load) is reported as a single human-readable
+        # stderr line, exit code 1 -- caught exactly once, here, regardless
+        # of which pipeline stage (T009-T012, via T013) actually raised it.
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 if __name__ == "__main__":

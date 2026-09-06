@@ -148,6 +148,14 @@ class AudioExtractionError(WhisperFlowError):
     rejected up front by probing, before extraction is ever attempted).
     Maps to CLI exit code 1 per contracts/cli.md's "ASR model failed to
     load"-adjacent fatal-error bucket.
+
+    Also raised by pipeline orchestration (T013, `src/cli/pipeline.py`)
+    when it fails to remove the temporary WAV file `extract_audio()`
+    produced, once transcription has otherwise finished -- a permission/
+    lock error there is still a failure of this same "the extracted audio
+    track couldn't be cleanly handled" family, and must surface through
+    this same single-line, exit-code-1 path rather than as a raw
+    unhandled `OSError`.
     """
 
     def __init__(self, path: str | Path, stderr: str = "") -> None:
@@ -198,6 +206,25 @@ class ModelLoadError(WhisperFlowError):
         self.reason = reason.strip()
         detail = f": {self.reason}" if self.reason else ""
         message = f"failed to load ASR model '{model_size}'{detail}"
+        super().__init__(message)
+
+
+class SubtitleWriteError(WhisperFlowError):
+    """Writing the composed `.srt` output failed (T012/T013).
+
+    Raised by pipeline orchestration (`src/cli/pipeline.py`) when
+    `SubtitleFile.write()` raises an ordinary `OSError` -- e.g. a
+    non-writable output directory, a full disk, or a permissions error --
+    so that an expected, user-facing output failure is reported the same
+    way as every other FR-007 failure (via `ProgressReporter.report_failure()`
+    and a non-zero exit) instead of escaping as a raw traceback.
+    """
+
+    def __init__(self, path: str | Path, reason: str = "") -> None:
+        self.path = Path(path)
+        self.reason = reason.strip()
+        detail = f": {self.reason}" if self.reason else ""
+        message = f"failed to write subtitle file to '{self.path}'{detail}"
         super().__init__(message)
 
 

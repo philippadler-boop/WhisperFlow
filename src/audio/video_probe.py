@@ -108,10 +108,13 @@ def probe_video(path: Path | str) -> Video:
 def _run_ffprobe(video_path: Path) -> dict[str, Any]:
     """Run `ffprobe` against `video_path` and return its parsed JSON report.
 
-    Any failure to get back a usable report (missing binary, non-zero exit,
-    empty/unparseable output -- e.g. a non-media file) is treated as "not a
-    supported video" (`UnsupportedVideoFormatError`) rather than crashing,
-    per FR-007.
+    Any failure to get back a usable report (missing binary, a present but
+    unlaunchable binary, non-zero exit, empty/unparseable output -- e.g. a
+    non-media file) is treated as "not a supported video"
+    (`UnsupportedVideoFormatError`) rather than crashing, per FR-007 --
+    except a genuinely missing binary, which is distinguished as
+    `FfmpegNotFoundError` since its remediation ("install ffmpeg") differs
+    from every other case here.
     """
     if shutil.which(FFPROBE_EXECUTABLE) is None:
         raise FfmpegNotFoundError(FFPROBE_EXECUTABLE)
@@ -136,6 +139,22 @@ def _run_ffprobe(video_path: Path) -> dict[str, Any]:
         # Race: shutil.which() found it, but it's gone (or unexecutable) by
         # the time subprocess actually tries to run it.
         raise FfmpegNotFoundError(FFPROBE_EXECUTABLE) from exc
+    except OSError as exc:
+        # Every other OSError subclass subprocess.run can raise for a
+        # binary that IS present on PATH but can't actually be launched --
+        # PermissionError (blocked/non-executable), NotADirectoryError (a
+        # PATH component collision), or a corrupt/wrong-architecture binary
+        # (surfaces as a plain OSError, e.g. "Exec format error") -- mirrors
+        # src/audio/extract.py's identical guard around ffmpeg itself.
+        # Deliberately *not* folded into FfmpegNotFoundError above: that
+        # error's message ("install ffmpeg and ensure it is on PATH") would
+        # be actively wrong here -- ffprobe *is* on PATH, it just couldn't
+        # be started -- so this joins the same "not a supported video"
+        # bucket this function already uses for every other
+        # can't-get-a-usable-report case just below (a non-zero exit,
+        # empty/unparseable output), per FR-007. Never a raw OSError
+        # (ADR 0002's subprocess-wrapper contract).
+        raise UnsupportedVideoFormatError(video_path) from exc
 
     if result.returncode != 0 or not result.stdout.strip():
         raise UnsupportedVideoFormatError(video_path)

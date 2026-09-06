@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lib.errors import SubtitleWriteError
 from subtitles.models import SubtitleFile, SubtitleLine
 from transcription.transcribe import Transcript
 
@@ -98,5 +99,8 @@ def write_subtitles(transcript: Transcript, output_path: Path | str) -> Subtitle
         the path separately.
     """
     subtitle_file = transcript_to_subtitle_file(transcript, output_path=output_path)
-    subtitle_file.write()
+    try:
+        subtitle_file.write()
+    except OSError as exc:
+        raise SubtitleWriteError(output_path, reason=str(exc)) from exc
     return subtitle_file

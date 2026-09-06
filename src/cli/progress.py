@@ -177,6 +177,19 @@ class ProgressReporter:
         self._job.fail(error)
         print(f"Error: {error}", file=self._stream, flush=True)
 
+    def report_notice(self, message: str) -> None:
+        """Print a stderr notice that is neither a stage transition nor a failure.
+
+        Used by the T013 pipeline for FR-008's "no detectable speech" case:
+        the job is not failing (it still reaches `Done` exactly as any
+        other successful run would) and no stage transition is happening,
+        but the user still needs an explicit, clearly-stated heads-up that
+        the resulting `.srt` file has zero subtitle lines by design, not
+        because of a bug.
+        """
+        self._close_percent_line()
+        print(message, file=self._stream, flush=True)
+
     def _close_percent_line(self) -> None:
         if self._percent_line_open:
             print(file=self._stream, flush=True)
