@@ -201,6 +201,25 @@ class ModelLoadError(WhisperFlowError):
         super().__init__(message)
 
 
+class SubtitleWriteError(WhisperFlowError):
+    """Writing the composed `.srt` output failed (T012/T013).
+
+    Raised by pipeline orchestration (`src/cli/pipeline.py`) when
+    `SubtitleFile.write()` raises an ordinary `OSError` -- e.g. a
+    non-writable output directory, a full disk, or a permissions error --
+    so that an expected, user-facing output failure is reported the same
+    way as every other FR-007 failure (via `ProgressReporter.report_failure()`
+    and a non-zero exit) instead of escaping as a raw traceback.
+    """
+
+    def __init__(self, path: str | Path, reason: str = "") -> None:
+        self.path = Path(path)
+        self.reason = reason.strip()
+        detail = f": {self.reason}" if self.reason else ""
+        message = f"failed to write subtitle file to '{self.path}'{detail}"
+        super().__init__(message)
+
+
 class TranscriptionError(WhisperFlowError):
     """`faster-whisper` failed to transcribe an already-extracted audio track (T011).
 

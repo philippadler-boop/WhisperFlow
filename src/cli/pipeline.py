@@ -39,7 +39,20 @@ probing/extraction/transcription for FR-007's unsupported-format/
 oversized-video/missing-ffmpeg/model-load cases) is reported to stderr via
 `ProgressReporter.report_failure()` (which also moves the job to `Failed`)
 and then re-raised, so the caller (T014) only has to decide the process
-exit code -- it doesn't need to print its own duplicate error line.
+exit code -- it doesn't need to print its own duplicate error line. An
+`OSError` from `SubtitleFile.write()` (T012) -- e.g. a non-writable output
+directory or a full disk -- is translated into `lib.errors.SubtitleWriteError`
+before it can reach that same handler, so output-write failures are
+reported identically rather than escaping as a raw traceback.
+
+`run_pipeline()` never itself advances the job past `WritingSubtitles` on a
+successful run -- as noted above, only T014/T021 knows whether `--review`
+means the next stop is `AwaitingReview` or `Done`. To make that handoff
+possible, the same `ProgressReporter` used throughout the run (wrapping the
+same `ProcessingJob`) is returned on `PipelineResult.reporter`, so T014 can
+complete the job's state machine (e.g.
+`result.reporter.announce_stage(Stage.DONE)`) instead of being left with no
+reference to it at all.
 """
 
 from __future__ import annotations
@@ -52,7 +65,7 @@ from typing import TextIO
 from audio.extract import AudioTrack, extract_audio
 from audio.video_probe import probe_video
 from cli.progress import ProcessingJob, ProgressReporter, Stage
-from lib.errors import WhisperFlowError
+from lib.errors import SubtitleWriteError, WhisperFlowError
 from subtitles.models import SubtitleFile
 from subtitles.writer import write_subtitle_file
 from transcription.transcribe import DEFAULT_MODEL_SIZE, Transcript, transcribe_audio
@@ -65,11 +78,16 @@ class PipelineResult:
     Bundles the written `SubtitleFile` together with the `Transcript` it
     was derived from, so a caller (T014) can both locate the output file
     and inspect whether any speech was actually detected without having to
-    re-derive that from the file on disk.
+    re-derive that from the file on disk. Also carries the `ProgressReporter`
+    (and, through it, the `ProcessingJob`) this run advanced, so T014 can
+    move the same job on to `AwaitingReview`/`Done` once it decides which
+    applies -- without this, the job would be stranded at `WritingSubtitles`
+    forever on every successful run.
     """
 
     subtitle_file: SubtitleFile
     transcript: Transcript
+    reporter: ProgressReporter
 
     @property
     def has_speech(self) -> bool:
@@ -98,15 +116,18 @@ def run_pipeline(
             capturing real stderr.
 
     Returns:
-        A `PipelineResult` wrapping the written `SubtitleFile` and the
+        A `PipelineResult` wrapping the written `SubtitleFile`, the
         `Transcript` it came from -- `PipelineResult.has_speech` is
-        `False` exactly when FR-008's "no detectable speech" case applied.
+        `False` exactly when FR-008's "no detectable speech" case applied
+        -- and the `ProgressReporter` (job still at `WritingSubtitles`)
+        this run used, so the caller can advance it the rest of the way.
 
     Raises:
         WhisperFlowError (or one of its subclasses from `lib/errors.py`):
             any FR-007 failure -- unsupported/undetectable video format,
             video exceeds the 2-hour maximum, `ffmpeg`/model not found or
-            failing, transcription failing partway through. Before
+            failing, transcription failing partway through, or the output
+            `.srt` file failing to write (`SubtitleWriteError`). Before
             re-raising, the failure is reported to `progress_stream` via
             `ProgressReporter.report_failure()`.
     """
@@ -145,7 +166,10 @@ def run_pipeline(
             transcript = Transcript(source_video=video, language="", segments=[])
 
         reporter.announce_stage(Stage.WRITING_SUBTITLES)
-        subtitle_file = write_subtitle_file(transcript, resolved_output_path)
+        try:
+            subtitle_file = write_subtitle_file(transcript, resolved_output_path)
+        except OSError as exc:
+            raise SubtitleWriteError(resolved_output_path, reason=str(exc)) from exc
 
         if not transcript.segments:
             reporter.report_notice(
@@ -153,7 +177,9 @@ def run_pipeline(
                 f"empty subtitle file to '{subtitle_file.output_path}'."
             )
 
-        return PipelineResult(subtitle_file=subtitle_file, transcript=transcript)
+        return PipelineResult(
+            subtitle_file=subtitle_file, transcript=transcript, reporter=reporter
+        )
     except WhisperFlowError as exc:
         reporter.report_failure(str(exc))
         raise

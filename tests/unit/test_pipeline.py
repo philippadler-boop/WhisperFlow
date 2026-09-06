@@ -6,7 +6,11 @@ percentage progress via T006), both flavors of FR-008's "no detectable
 speech" case (an audio track that simply has no speech in it, and no
 audio track at all), propagation of each stage's `WhisperFlowError`
 subclasses (with a matching `Error: ...` stderr line and a `Failed` job),
-and cleanup of the pipeline's own temporary extracted-audio file.
+cleanup of the pipeline's own temporary extracted-audio file, that the
+returned `PipelineResult.reporter` lets a caller advance a successful run's
+job to a terminal stage, and that an output-write `OSError` is translated
+into `SubtitleWriteError` (reported and re-raised like any other failure,
+with temp-audio cleanup still happening).
 
 All of `probe_video`, `extract_audio`, and `transcribe_audio` are
 monkeypatched at `cli.pipeline`'s own module level -- this module cares
@@ -26,10 +30,12 @@ import cli.pipeline as pipeline_module
 from audio.extract import AudioTrack
 from audio.video_probe import Video
 from cli.pipeline import PipelineResult, run_pipeline
+from cli.progress import Stage
 from lib.errors import (
     AudioExtractionError,
     FfmpegNotFoundError,
     ModelLoadError,
+    SubtitleWriteError,
     TranscriptionError,
     UnsupportedVideoFormatError,
 )
@@ -170,6 +176,34 @@ class TestRunPipelineHappyPath:
         run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())
 
         assert not wav_path.exists()
+
+    def test_returned_reporter_can_complete_the_job_to_a_terminal_stage(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        # run_pipeline() itself only ever takes the job as far as
+        # WritingSubtitles (the --review/--no-review branching into
+        # AwaitingReview/Done is T014/T021's call, not this module's) --
+        # but the caller must actually be able to reach one of those
+        # terminal stages using what run_pipeline() gives back, or every
+        # successful run would leave its job stranded forever.
+        video = _video(tmp_path)
+        _patch_probe(monkeypatch, video)
+        _patch_extract(monkeypatch, tmp_path, video)
+        _patch_transcribe(
+            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
+        )
+
+        result = run_pipeline(
+            video.path, tmp_path / "out.srt", progress_stream=io.StringIO()
+        )
+
+        assert result.reporter.job.stage == Stage.WRITING_SUBTITLES
+        assert result.reporter.job.is_terminal is False
+
+        result.reporter.announce_stage(Stage.DONE)
+
+        assert result.reporter.job.stage == Stage.DONE
+        assert result.reporter.job.is_terminal is True
 
 
 class TestRunPipelineNoSpeechDetected:
@@ -345,6 +379,48 @@ class TestRunPipelineFailureModes:
         monkeypatch.setattr(pipeline_module, "transcribe_audio", _transcribe)
 
         with pytest.raises(TranscriptionError):
+            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())
+
+        assert not wav_path.exists()
+
+    def test_output_write_failure_is_reported_as_subtitle_write_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        video = _video(tmp_path)
+        _patch_probe(monkeypatch, video)
+        _patch_extract(monkeypatch, tmp_path, video)
+        _patch_transcribe(
+            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
+        )
+
+        def _boom_write(transcript, output_path):
+            raise PermissionError("Permission denied")
+
+        monkeypatch.setattr(pipeline_module, "write_subtitle_file", _boom_write)
+        stream = io.StringIO()
+
+        with pytest.raises(SubtitleWriteError):
+            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
+
+        assert "Error:" in stream.getvalue()
+        assert "Permission denied" in stream.getvalue()
+
+    def test_output_write_failure_still_cleans_up_temporary_extracted_audio_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        video = _video(tmp_path)
+        _patch_probe(monkeypatch, video)
+        wav_path = _patch_extract(monkeypatch, tmp_path, video)
+        _patch_transcribe(
+            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
+        )
+
+        def _boom_write(transcript, output_path):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(pipeline_module, "write_subtitle_file", _boom_write)
+
+        with pytest.raises(SubtitleWriteError):
             run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())
 
         assert not wav_path.exists()
