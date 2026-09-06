@@ -181,3 +181,8 @@ msiexec /x "dist\WhisperFlow-0.1.0.msi" /qn /norestart
 ```
 
 Open a new terminal after installing so the updated `PATH` takes effect.
+
+`<install-dir>\uninstall.exe` (`C:\Program Files\WhisperFlow\uninstall.exe`
+by default) is also installed as a friend-friendly alternative to
+`msiexec`/Programs & Features: double-clicking it prompts for elevation via
+UAC and removes the installed product.

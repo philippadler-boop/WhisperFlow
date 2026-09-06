@@ -32,6 +32,8 @@ try {
         --collect-all faster_whisper --collect-all ctranslate2 `
         --add-binary "$ffmpeg;bin" --add-binary "$ffprobe;bin" src\cli\main.py
     Move-Item dist\whisperflow $publishDirectory
+    pyinstaller --noconfirm --clean --onefile --name uninstall packaging\windows\uninstall.py
+    Copy-Item dist\uninstall.exe (Join-Path $publishDirectory "uninstall.exe") -Force
     wix build packaging\windows\WhisperFlow.wxs -d "PublishDir=$publishDirectory" `
         -d "Version=$Version" -o "dist\WhisperFlow-$Version.msi"
 }
