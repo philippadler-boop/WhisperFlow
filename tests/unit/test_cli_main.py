@@ -1,9 +1,15 @@
-"""Unit tests for the `whisperflow transcribe` CLI skeleton (T007).
+"""Unit tests for the `whisperflow transcribe` CLI (T007, T014).
 
-Exercises argument/option parsing, defaulting, and the not-yet-implemented
-pipeline hookup, per contracts/cli.md. A full contract test (asserting the
-entire `--help` surface matches contracts/cli.md verbatim) is T008's
-responsibility; these tests cover the behavior this task actually adds.
+Exercises argument/option parsing and defaulting (T007), per
+contracts/cli.md. A full contract test (asserting the entire `--help`
+surface matches contracts/cli.md verbatim) is T008's responsibility.
+
+T014's own behavior -- dispatching the `--no-review` path to T013's real
+`cli.pipeline.run_pipeline`, `--review` still raising `NotImplementedError`
+(T020/T021 aren't done yet), and reporting any `lib.errors.WhisperFlowError`
+raised by the pipeline as a single `Error: ...` stderr line with exit code
+1 (spec FR-007) -- is covered by the `TestRunPipelineDispatch` and
+`TestErrorReporting` classes below.
 """
 
 from __future__ import annotations
@@ -15,7 +21,13 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+import cli.main as main_module
 from cli.main import ModelSize, _default_editor, _default_output_path, app
+from lib.errors import (
+    FfmpegNotFoundError,
+    MaxDurationExceededError,
+    UnsupportedVideoFormatError,
+)
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -135,8 +147,106 @@ def test_editor_option_overrides_env(
     assert captured_pipeline_call["editor"] == "code --wait"
 
 
-def test_transcribe_calls_not_yet_implemented_pipeline(cli_runner: CliRunner) -> None:
-    """Skeleton wiring: real invocation surfaces NotImplementedError for now."""
+def test_transcribe_review_still_not_implemented(cli_runner: CliRunner) -> None:
+    """`--review` (the default) has no implementation yet (T020/T021)."""
     result = cli_runner.invoke(app, ["transcribe", "video.mp4"])
     assert result.exit_code == 1
     assert isinstance(result.exception, NotImplementedError)
+
+
+class TestRunPipelineDispatch:
+    """T014: `--no-review` dispatches to `cli.pipeline.run_pipeline`."""
+
+    def test_no_review_calls_pipeline_run_pipeline(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        captured: dict[str, Any] = {}
+        monkeypatch.setattr(
+            main_module.pipeline,
+            "run_pipeline",
+            lambda **kwargs: captured.update(kwargs),
+        )
+
+        result = cli_runner.invoke(
+            app,
+            ["transcribe", "video.mp4", "--no-review", "--output", "out.srt", "--model", "small"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured["video_path"] == Path("video.mp4")
+        assert captured["output_path"] == Path("out.srt")
+        assert captured["model_size"] == "small"
+
+    def test_review_flag_does_not_reach_pipeline(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        called = False
+
+        def _fake_run_pipeline(**kwargs):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", _fake_run_pipeline)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--review"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, NotImplementedError)
+        assert called is False
+
+
+class TestErrorReporting:
+    """T014: pipeline `WhisperFlowError`s become a single stderr line, exit 1."""
+
+    def test_unsupported_format_reported_clearly(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(**kwargs):
+            raise UnsupportedVideoFormatError("video.avi", detected_format="avi")
+
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", _raise)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--no-review"])
+
+        assert result.exit_code == 1
+        assert result.exception is None or not isinstance(result.exception, NotImplementedError)
+        assert "Error: unsupported video format 'avi'" in result.output
+
+    def test_oversized_video_reported_clearly(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(**kwargs):
+            raise MaxDurationExceededError(8000.0)
+
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", _raise)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--no-review"])
+
+        assert result.exit_code == 1
+        assert "Error: video exceeds maximum supported length" in result.output
+
+    def test_missing_ffmpeg_reported_clearly(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(**kwargs):
+            raise FfmpegNotFoundError("ffmpeg")
+
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", _raise)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--no-review"])
+
+        assert result.exit_code == 1
+        assert "Error: required 'ffmpeg' binary was not found on PATH" in result.output
+
+    def test_error_message_is_a_single_line(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(**kwargs):
+            raise FfmpegNotFoundError("ffmpeg")
+
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", _raise)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--no-review"])
+
+        error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
+        assert len(error_lines) == 1
