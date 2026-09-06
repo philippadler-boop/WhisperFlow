@@ -163,11 +163,11 @@ per-user acceptance command; review WiX's Open Source Maintenance Fee terms
 before running it.
 
 The MSI installs per-machine (`Scope="perMachine"`) under
-`Program Files\WhisperFlow` and registers that directory on the system
-`PATH`. Both install and uninstall require an elevated (Administrator)
-session; running `msiexec` from a non-elevated terminal fails with
-Error 1925 (install) or Error 1730 (uninstall) even though the terminal
-looks like a normal PowerShell prompt. Confirm elevation first:
+`C:\Program Files (x86)\WhisperFlow` and registers that directory on the
+system `PATH`. Both install and uninstall require an elevated
+(Administrator) session; running `msiexec` from a non-elevated terminal
+fails with Error 1925 (install) or Error 1730 (uninstall) even though the
+terminal looks like a normal PowerShell prompt. Confirm elevation first:
 
 ```powershell
 ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -182,7 +182,8 @@ msiexec /x "dist\WhisperFlow-0.1.0.msi" /qn /norestart
 
 Open a new terminal after installing so the updated `PATH` takes effect.
 
-`<install-dir>\uninstall.exe` (`C:\Program Files\WhisperFlow\uninstall.exe`
-by default) is also installed as a friend-friendly alternative to
-`msiexec`/Programs & Features: double-clicking it prompts for elevation via
-UAC and removes the installed product.
+`<install-dir>\uninstall.exe`
+(`C:\Program Files (x86)\WhisperFlow\uninstall.exe` by default) is also
+installed as a friend-friendly alternative to `msiexec`/Programs & Features:
+double-clicking it prompts for elevation via UAC and removes the installed
+product.
