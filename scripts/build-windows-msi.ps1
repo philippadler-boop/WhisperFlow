@@ -28,6 +28,7 @@ New-Item -ItemType Directory -Path $publishParent -Force | Out-Null
 Push-Location $repositoryRoot
 try {
     pyinstaller --noconfirm --clean --onedir --name whisperflow --paths src `
+        --contents-directory . `
         --collect-all faster_whisper --collect-all ctranslate2 `
         --add-binary "$ffmpeg;bin" --add-binary "$ffprobe;bin" src\cli\main.py
     Move-Item dist\whisperflow $publishDirectory
