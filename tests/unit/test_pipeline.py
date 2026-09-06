@@ -424,3 +424,47 @@ class TestRunPipelineFailureModes:
             run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())
 
         assert not wav_path.exists()
+
+    def test_cleanup_failure_does_not_mask_transcription_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        video = _video(tmp_path)
+        _patch_probe(monkeypatch, video)
+        _patch_extract(monkeypatch, tmp_path, video)
+
+        def _raise_transcription(audio_track, *, model_size, on_segment=None):
+            raise TranscriptionError(audio_track.extracted_path, reason="decode failed")
+
+        def _raise_cleanup(*args, **kwargs):
+            raise PermissionError("audio file is locked")
+
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _raise_transcription)
+        monkeypatch.setattr(Path, "unlink", _raise_cleanup)
+        stream = io.StringIO()
+
+        with pytest.raises(TranscriptionError, match="decode failed"):
+            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
+
+        assert "decode failed" in stream.getvalue()
+
+    def test_cleanup_failure_after_success_is_reported_as_audio_extraction_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        video = _video(tmp_path)
+        _patch_probe(monkeypatch, video)
+        _patch_extract(monkeypatch, tmp_path, video)
+        _patch_transcribe(
+            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
+        )
+
+        def _raise_cleanup(*args, **kwargs):
+            raise PermissionError("audio file is locked")
+
+        monkeypatch.setattr(Path, "unlink", _raise_cleanup)
+        stream = io.StringIO()
+
+        with pytest.raises(AudioExtractionError, match="audio file is locked"):
+            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
+
+        assert "Error:" in stream.getvalue()
+        assert "audio file is locked" in stream.getvalue()

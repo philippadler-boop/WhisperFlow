@@ -65,7 +65,7 @@ from typing import TextIO
 from audio.extract import AudioTrack, extract_audio
 from audio.video_probe import probe_video
 from cli.progress import ProcessingJob, ProgressReporter, Stage
-from lib.errors import SubtitleWriteError, WhisperFlowError
+from lib.errors import AudioExtractionError, SubtitleWriteError, WhisperFlowError
 from subtitles.models import SubtitleFile
 from subtitles.writer import write_subtitles
 from transcription.transcribe import DEFAULT_MODEL_SIZE, Transcript, transcribe_audio
@@ -143,6 +143,7 @@ def run_pipeline(
     )
 
     audio_track: AudioTrack | None = None
+    primary_error: BaseException | None = None
     try:
         video = probe_video(resolved_video_path)
         reporter.job.video_duration_seconds = video.duration_seconds
@@ -180,8 +181,10 @@ def run_pipeline(
         return PipelineResult(
             subtitle_file=subtitle_file, transcript=transcript, reporter=reporter
         )
-    except WhisperFlowError as exc:
-        reporter.report_failure(str(exc))
+    except BaseException as exc:
+        if isinstance(exc, WhisperFlowError):
+            reporter.report_failure(str(exc))
+        primary_error = exc
         raise
     finally:
         # AudioTrack.extracted_path is always this pipeline's own private
@@ -189,4 +192,16 @@ def run_pipeline(
         # data-model.md: "Temporary WAV file, removed after the run".
         # Cleaned up on every exit (success or failure) once it exists.
         if audio_track is not None:
-            audio_track.extracted_path.unlink(missing_ok=True)
+            cleanup_error = _cleanup_temp_audio(audio_track.extracted_path)
+            if cleanup_error is not None and primary_error is None:
+                reporter.report_failure(str(cleanup_error))
+                raise cleanup_error
+
+
+def _cleanup_temp_audio(path: Path) -> AudioExtractionError | None:
+    """Remove a pipeline-owned temporary audio file without leaking OSError."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        return AudioExtractionError(path, stderr=f"failed to remove temporary file: {exc}")
+    return None
