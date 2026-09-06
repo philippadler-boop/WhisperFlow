@@ -51,6 +51,9 @@ from cli.main import app
 # a single dummy subtitle block spanning the whole ~3.49s clip.
 _KNOWN_SEGMENT_START_SECONDS = 0.0
 _KNOWN_SEGMENT_END_SECONDS = 3.2
+_KNOWN_SEGMENT_TIMINGS = (
+    (_KNOWN_SEGMENT_START_SECONDS, _KNOWN_SEGMENT_END_SECONDS),
+)
 _KNOWN_SPOKEN_WORDS = ("hello", "test", "whisper")
 
 # The exact, current placeholder message raised by `_run_pipeline` in
@@ -81,7 +84,7 @@ def test_clear_speech_video_produces_correct_time_synced_srt(
     result = cli_runner.invoke(app, ["transcribe", str(video_path), "--no-review"])
 
     if (
-        isinstance(result.exception, NotImplementedError)
+        type(result.exception) is NotImplementedError
         and str(result.exception) == _PLACEHOLDER_NOT_IMPLEMENTED_MESSAGE
     ):
         pytest.xfail(
@@ -120,9 +123,16 @@ def test_clear_speech_video_produces_correct_time_synced_srt(
     # blocks at 0.0-0.1 and 2.8-3.2 -- neither of which matches the recorded
     # single 0.0-3.2 segment despite passing a first-start/last-end-only
     # check).
-    (subtitle,) = subtitles
-    start = subtitle.start.total_seconds()
-    end = subtitle.end.total_seconds()
-    assert end >= start, "subtitle block's end must be >= its start"
-    assert start == pytest.approx(_KNOWN_SEGMENT_START_SECONDS, abs=0.3)
-    assert end == pytest.approx(_KNOWN_SEGMENT_END_SECONDS, abs=0.3)
+    actual_timings = tuple(
+        (
+            subtitle.start.total_seconds(),
+            subtitle.end.total_seconds(),
+        )
+        for subtitle in subtitles
+    )
+    for (actual_start, actual_end), (expected_start, expected_end) in zip(
+        actual_timings, _KNOWN_SEGMENT_TIMINGS, strict=True
+    ):
+        assert actual_end >= actual_start, "subtitle block's end must be >= its start"
+        assert actual_start == pytest.approx(expected_start, abs=0.3)
+        assert actual_end == pytest.approx(expected_end, abs=0.3)
