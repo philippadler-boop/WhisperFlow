@@ -11,28 +11,13 @@ next to the input video containing subtitle blocks whose text matches what
 was spoken, in the video's original language, with start/end timestamps that
 line up with the audio.
 
-Blocked on T012/T013/T014 (issues #12, #13, #14): `src/subtitles/writer.py`,
-`src/cli/pipeline.py`, and their wiring into `src/cli/main.py` aren't merged
-into `main` yet, so `whisperflow transcribe` still raises `NotImplementedError`
-for any real invocation (see
-``tests/unit/test_cli_main.py::test_transcribe_calls_not_yet_implemented_pipeline``).
-This test is written now against the intended end-to-end behavior. Rather
-than a blanket `xfail(strict=False)` on the whole test (which would also
-swallow assertion failures, model-load failures, and malformed output once
-T012-T014 land), the test runs the CLI invocation first and only calls
-`pytest.xfail(...)` if the exception is a `NotImplementedError` whose message
-matches the *current placeholder's exact, known string* (see
-`_PLACEHOLDER_NOT_IMPLEMENTED_MESSAGE` below, sourced from
-`src/cli/main.py::_run_pipeline`); any other outcome -- including a
-`NotImplementedError` raised by a future pipeline stage, model integration,
-or a malformed implementation once the pipeline is wired up -- fails the
-test normally instead of being silently swallowed as an expected failure.
-Once T012/T013/T014 land, this test should simply start passing and the
-`NotImplementedError` special-case below can be deleted in a follow-up.
+The test exercises the real pipeline, including the tiny model and timing
+assertions, so a regression to the old unimplemented placeholder fails here.
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -54,16 +39,18 @@ _KNOWN_SEGMENT_END_SECONDS = 3.2
 _KNOWN_SEGMENT_TIMINGS = (
     (_KNOWN_SEGMENT_START_SECONDS, _KNOWN_SEGMENT_END_SECONDS),
 )
-_KNOWN_SPOKEN_WORDS = ("hello", "test", "whisper")
-
-# The exact, current placeholder message raised by `_run_pipeline` in
-# `src/cli/main.py`. Only *this* specific `NotImplementedError` is treated as
-# the known, expected-for-now blocker (see module docstring); any other
-# `NotImplementedError` -- e.g. from a future pipeline stage or a malformed
-# implementation once T012/T013/T014 land -- fails the test normally instead
-# of being masked by `xfail`.
-_PLACEHOLDER_NOT_IMPLEMENTED_MESSAGE = (
-    "whisperflow transcribe: pipeline not yet implemented (see T013/T014)"
+_KNOWN_SPOKEN_WORDS = (
+    "hello",
+    "this",
+    "is",
+    "a",
+    "test",
+    "on",
+    "the",
+    "whisper",
+    "flow",
+    "sub-title",
+    "generator",
 )
 
 
@@ -85,18 +72,6 @@ def test_clear_speech_video_produces_correct_time_synced_srt(
         app, ["transcribe", str(video_path), "--model", "tiny", "--no-review"]
     )
 
-    if (
-        type(result.exception) is NotImplementedError
-        and str(result.exception) == _PLACEHOLDER_NOT_IMPLEMENTED_MESSAGE
-    ):
-        pytest.xfail(
-            "blocked on #12/#13/#14: whisperflow transcribe's pipeline "
-            "(src/subtitles/writer.py, src/cli/pipeline.py, and its CLI "
-            "wiring into src/cli/main.py) isn't implemented/merged yet -- "
-            "transcribe currently raises NotImplementedError for any real "
-            "invocation"
-        )
-
     assert result.exit_code == 0, result.output
     assert expected_srt_path.is_file(), "expected .srt file was not created"
 
@@ -115,8 +90,11 @@ def test_clear_speech_video_produces_correct_time_synced_srt(
     # Text matches what's spoken in the fixture, in the original language
     # (no translation -- FR-003).
     joined_text = " ".join(subtitle.content for subtitle in subtitles).lower()
-    for word in _KNOWN_SPOKEN_WORDS:
-        assert word in joined_text, f"expected spoken word {word!r} in {joined_text!r}"
+    actual_words = tuple(re.findall(r"[a-z]+(?:-[a-z]+)?", joined_text))
+    assert actual_words == _KNOWN_SPOKEN_WORDS, (
+        f"expected complete transcription {_KNOWN_SPOKEN_WORDS!r}, "
+        f"got {actual_words!r} from {joined_text!r}"
+    )
 
     # Timing lines up with the audio: the single block's start/end must each
     # match the known real-transcription ground truth for this fixture
