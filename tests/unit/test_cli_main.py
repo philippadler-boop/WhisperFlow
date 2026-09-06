@@ -15,6 +15,7 @@ raised by the pipeline as a single `Error: ...` stderr line with exit code
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -250,3 +251,31 @@ class TestErrorReporting:
 
         error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
         assert len(error_lines) == 1
+
+    def test_ffprobe_launch_failure_reported_clearly_not_as_raw_error(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A present-but-unlaunchable `ffprobe` (P3 review) must still be a
+        single clear `Error: ...` line, exit code 1 -- exercised through the
+        real CLI -> `cli.pipeline.run_pipeline` -> `probe_video` path, with
+        nothing mocked below `subprocess.run`/`shutil.which` themselves, so
+        this can't pass by coincidence of a higher-level mock swallowing the
+        real translation logic under test.
+        """
+        monkeypatch.setattr("shutil.which", lambda executable: f"/usr/bin/{executable}")
+
+        def _raise_permission_error(*args, **kwargs):
+            raise PermissionError("[Errno 13] Permission denied: 'ffprobe'")
+
+        monkeypatch.setattr(subprocess, "run", _raise_permission_error)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--no-review"])
+
+        assert result.exit_code == 1
+        assert result.exception is None or not isinstance(result.exception, NotImplementedError)
+        error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
+        assert len(error_lines) == 1
+        # Must not be misreported as FfmpegNotFoundError -- ffprobe *is* on
+        # PATH here, it just couldn't be launched, so "install ffmpeg" would
+        # be an actively wrong remediation.
+        assert "install ffmpeg" not in error_lines[0].lower()

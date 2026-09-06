@@ -25,6 +25,7 @@ import cli.pipeline as pipeline_module
 from audio.extract import AudioTrack
 from audio.video_probe import Video
 from lib.errors import (
+    AudioExtractionError,
     FfmpegNotFoundError,
     ModelLoadError,
     TranscriptionError,
@@ -34,12 +35,14 @@ from subtitles.models import SubtitleFile
 from transcription.transcribe import Transcript, TranscriptSegment
 
 
-def _video(tmp_path: Path, duration_seconds: float = 10.0) -> Video:
+def _video(
+    tmp_path: Path, duration_seconds: float = 10.0, has_audio_track: bool = True
+) -> Video:
     return Video(
         path=tmp_path / "clip.mp4",
         container_format="mp4",
         duration_seconds=duration_seconds,
-        has_audio_track=True,
+        has_audio_track=has_audio_track,
     )
 
 
@@ -219,6 +222,164 @@ class TestRunPipelineHappyPath:
         )
 
         assert not audio_track.extracted_path.exists()
+
+
+class TestRunPipelineNoAudioTrack:
+    """FR-008's stronger case: `Video.has_audio_track is False`.
+
+    Distinct from the "no detectable speech" tests above (which fake an
+    empty transcript from a video that *does* have an audio track) --
+    here there is no audio track at all, so `extract_audio()`/
+    `transcribe_audio()` must never even be called: `extract_audio()` has
+    nothing to map to its output for a video like this and would only
+    ever raise `AudioExtractionError`, turning FR-008's documented
+    successful outcome into a fatal, exit-code-1 error (P1 review).
+    """
+
+    def test_skips_extraction_and_transcription_and_exits_successfully(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path, has_audio_track=False)
+        output_path = tmp_path / "out.srt"
+        extract_calls: list[Video] = []
+        transcribe_calls: list[object] = []
+
+        def _fake_extract_audio(v):
+            extract_calls.append(v)
+            raise AssertionError("extract_audio must not be called when has_audio_track is False")
+
+        def _fake_transcribe_audio(track, **kwargs):
+            transcribe_calls.append(track)
+            raise AssertionError(
+                "transcribe_audio must not be called when has_audio_track is False"
+            )
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", _fake_extract_audio)
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _fake_transcribe_audio)
+
+        stream = io.StringIO()
+        result = pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=output_path,
+            model_size="base",
+            stream=stream,
+        )
+
+        assert extract_calls == []
+        assert transcribe_calls == []
+        assert result.output_path == output_path
+        assert output_path.exists()
+        assert output_path.read_text(encoding="utf-8") == ""
+        output = stream.getvalue()
+        assert pipeline_module.NO_SPEECH_DETECTED_MESSAGE in output
+        assert "Done." in output
+
+    def test_no_audio_track_writes_empty_srt_regardless_of_writer_stub(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path, has_audio_track=False)
+        write_calls: list[tuple[object, Path]] = []
+
+        def _fake_write_subtitles(transcript_arg, output_path_arg):
+            write_calls.append((transcript_arg, Path(output_path_arg)))
+            subtitle_file = SubtitleFile(source_video=video, output_path=Path(output_path_arg))
+            subtitle_file.write()
+            return subtitle_file
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _fake_write_subtitles)
+
+        result = pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=tmp_path / "out.srt",
+            model_size="base",
+            stream=io.StringIO(),
+        )
+
+        assert len(write_calls) == 1
+        transcript_arg, _ = write_calls[0]
+        assert transcript_arg.segments == []
+        assert result.output_path == tmp_path / "out.srt"
+
+
+class TestRunPipelineCleanupFailure:
+    """P2 review: temp-audio cleanup must be best-effort, never leaking a
+    raw `OSError` or masking a more important exception already
+    propagating.
+    """
+
+    def test_cleanup_failure_after_successful_transcription_raises_domain_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(
+            video, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="Hi")]
+        )
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
+        )
+        write_called = False
+
+        def _fake_write_subtitles(transcript_arg, output_path_arg):
+            nonlocal write_called
+            write_called = True
+            return SubtitleFile(source_video=video, output_path=Path(output_path_arg))
+
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _fake_write_subtitles)
+
+        def _raise_permission_error(self, missing_ok=False):
+            raise PermissionError("[Errno 13] Permission denied")
+
+        monkeypatch.setattr(Path, "unlink", _raise_permission_error)
+
+        with pytest.raises(AudioExtractionError):
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
+
+        # A cleanup failure after a fully successful transcription is this
+        # run's *only* failure -- it must still be reported, not silently
+        # swallowed -- but must not prevent the (already-successful) write
+        # stage from having run.
+        assert write_called is True
+
+    def test_cleanup_failure_during_failed_transcription_does_not_mask_primary_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+
+        def _raise_transcription_error(track, **kwargs):
+            raise TranscriptionError(track.extracted_path, reason="boom")
+
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _raise_transcription_error)
+
+        def _raise_permission_error(self, missing_ok=False):
+            raise PermissionError("[Errno 13] Permission denied")
+
+        monkeypatch.setattr(Path, "unlink", _raise_permission_error)
+
+        # The primary TranscriptionError must win -- a simultaneous cleanup
+        # failure must not replace it with an AudioExtractionError/raw
+        # PermissionError instead.
+        with pytest.raises(TranscriptionError, match="boom"):
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
 
 
 class TestRunPipelinePropagatesDomainErrors:
