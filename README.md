@@ -151,10 +151,13 @@ FFmpeg directory containing `ffmpeg.exe` and `ffprobe.exe`:
 
 ```powershell
 python -m pip install -e ".[packaging]"
-winget install WiXToolset.WiXToolset
+winget install --id WiXToolset.WiXCLI --exact --source winget
+wix eula accept wix7
 .\scripts\build-windows-msi.ps1 -FfmpegDirectory C:\tools\ffmpeg\bin
 ```
 
 The resulting installer is written to `dist\WhisperFlow-<version>.msi`.
 Test it in Windows Sandbox or a clean virtual machine without Python or FFmpeg
-installed before release.
+installed before release. `wix eula accept wix7` is WiX v7's one-time,
+per-user acceptance command; review WiX's Open Source Maintenance Fee terms
+before running it.

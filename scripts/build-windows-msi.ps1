@@ -31,8 +31,8 @@ try {
         --collect-all faster_whisper --collect-all ctranslate2 `
         --add-binary "$ffmpeg;bin" --add-binary "$ffprobe;bin" src\cli\main.py
     Move-Item dist\whisperflow $publishDirectory
-    wix build packaging\windows\WhisperFlow.wxs "-dPublishDir=$publishDirectory" `
-        "-dVersion=$Version" -o "dist\WhisperFlow-$Version.msi"
+    wix build packaging\windows\WhisperFlow.wxs -d "PublishDir=$publishDirectory" `
+        -d "Version=$Version" -o "dist\WhisperFlow-$Version.msi"
 }
 finally {
     Pop-Location
