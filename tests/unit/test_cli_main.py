@@ -23,7 +23,7 @@ import pytest
 from typer.testing import CliRunner
 
 import cli.main as main_module
-from cli.main import ModelSize, _default_editor, _default_output_path, app
+from cli.main import BANNER, ModelSize, _default_editor, _default_output_path, app
 from lib.errors import (
     FfmpegNotFoundError,
     MaxDurationExceededError,
@@ -44,6 +44,16 @@ def test_transcribe_is_a_required_subcommand(cli_runner: CliRunner) -> None:
     result = cli_runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "transcribe" in result.output
+
+
+def test_root_help_includes_colored_banner(cli_runner: CliRunner) -> None:
+    result = cli_runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "███████" in result.output
+    assert "Local video-to-subtitle transcription" in result.output
+    output = _plain(result.output)
+    for line in BANNER.strip().splitlines():
+        assert line.strip() in output
 
 
 def test_transcribe_help_documents_all_contract_options(cli_runner: CliRunner) -> None:
