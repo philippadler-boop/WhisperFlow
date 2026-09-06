@@ -20,6 +20,7 @@ from lib.errors import (
     FfmpegNotFoundError,
     MaxDurationExceededError,
     ModelLoadError,
+    SubtitleWriteError,
     TranscriptionError,
     UnsupportedVideoFormatError,
     WhisperFlowError,
@@ -216,6 +217,30 @@ class TestTranscriptionError:
             raise TranscriptionError("audio.wav", reason="boom")
 
 
+class TestSubtitleWriteError:
+    def test_is_a_whisperflow_error(self):
+        assert issubclass(SubtitleWriteError, WhisperFlowError)
+
+    def test_message_mentions_path(self):
+        err = SubtitleWriteError("/out/subs.srt")
+        assert str(Path("/out/subs.srt")) in str(err)
+        assert err.path == Path("/out/subs.srt")
+
+    def test_message_includes_reason_when_given(self):
+        err = SubtitleWriteError("/out/subs.srt", reason="Permission denied")
+        assert "Permission denied" in str(err)
+        assert err.reason == "Permission denied"
+
+    def test_message_omits_reason_when_not_given(self):
+        err = SubtitleWriteError("/out/subs.srt")
+        assert err.reason == ""
+        assert str(err) == f"failed to write subtitle file to '{Path('/out/subs.srt')}'"
+
+    def test_raisable_and_catchable(self):
+        with pytest.raises(SubtitleWriteError):
+            raise SubtitleWriteError("subs.srt", reason="boom")
+
+
 def test_all_domain_errors_are_catchable_via_common_base():
     errors = [
         UnsupportedVideoFormatError("clip.avi", detected_format="avi"),
@@ -224,6 +249,7 @@ def test_all_domain_errors_are_catchable_via_common_base():
         AudioExtractionError("clip.mp4", stderr="boom"),
         ModelLoadError("base", reason="boom"),
         TranscriptionError("audio.wav", reason="boom"),
+        SubtitleWriteError("subs.srt", reason="boom"),
     ]
     for error in errors:
         with pytest.raises(WhisperFlowError):
