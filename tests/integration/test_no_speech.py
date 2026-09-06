@@ -18,7 +18,6 @@ import srt
 from typer.testing import CliRunner
 
 from cli.main import app
-from cli.pipeline import NO_SPEECH_DETECTED_MESSAGE
 
 
 def test_silent_video_succeeds_with_empty_srt_and_stderr_notice(
@@ -40,4 +39,4 @@ def test_silent_video_succeeds_with_empty_srt_and_stderr_notice(
     assert result.stdout == ""
     assert expected_srt_path.is_file(), "expected .srt file was not created"
     assert list(srt.parse(expected_srt_path.read_text(encoding="utf-8"))) == []
-    assert NO_SPEECH_DETECTED_MESSAGE in result.stderr
+    assert "No speech detected" in result.stderr
