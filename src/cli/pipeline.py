@@ -67,7 +67,7 @@ from audio.video_probe import probe_video
 from cli.progress import ProcessingJob, ProgressReporter, Stage
 from lib.errors import SubtitleWriteError, WhisperFlowError
 from subtitles.models import SubtitleFile
-from subtitles.writer import write_subtitle_file
+from subtitles.writer import write_subtitles
 from transcription.transcribe import DEFAULT_MODEL_SIZE, Transcript, transcribe_audio
 
 
@@ -167,7 +167,7 @@ def run_pipeline(
 
         reporter.announce_stage(Stage.WRITING_SUBTITLES)
         try:
-            subtitle_file = write_subtitle_file(transcript, resolved_output_path)
+            subtitle_file = write_subtitles(transcript, resolved_output_path)
         except OSError as exc:
             raise SubtitleWriteError(resolved_output_path, reason=str(exc)) from exc
 

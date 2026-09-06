@@ -396,7 +396,7 @@ class TestRunPipelineFailureModes:
         def _boom_write(transcript, output_path):
             raise PermissionError("Permission denied")
 
-        monkeypatch.setattr(pipeline_module, "write_subtitle_file", _boom_write)
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _boom_write)
         stream = io.StringIO()
 
         with pytest.raises(SubtitleWriteError):
@@ -418,7 +418,7 @@ class TestRunPipelineFailureModes:
         def _boom_write(transcript, output_path):
             raise OSError("disk full")
 
-        monkeypatch.setattr(pipeline_module, "write_subtitle_file", _boom_write)
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _boom_write)
 
         with pytest.raises(SubtitleWriteError):
             run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())

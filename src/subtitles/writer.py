@@ -1,25 +1,33 @@
-"""Transcript -> SubtitleFile conversion and `.srt` writing (T012).
+"""Transcript -> `SubtitleFile` conversion and `.srt` file writing (T012).
 
-Converts an already-produced `Transcript` (T011,
-`src/transcription/transcribe.py`) into a `SubtitleFile` (T005,
-`src/subtitles/models.py`) by mapping each `TranscriptSegment` 1:1 onto a
-freshly generated `SubtitleLine` (data-model.md — SubtitleLine: "Initially
-derived 1:1 from a TranscriptSegment"), then composing and writing it out
-as `.srt` (spec FR-003, FR-006).
+Bridges T011's ASR output (`transcription.transcribe.Transcript`, an
+ordered list of `TranscriptSegment`s) to T005's subtitle domain model
+(`subtitles.models.SubtitleFile`/`SubtitleLine`), and writes the composed
+result to disk -- the last step of User Story 1's pipeline before an
+optional review (User Story 2). Concretely: FR-003 ("generate subtitles in
+the same language as the video's spoken audio") is satisfied upstream by
+T011 (no translation happens here, this module is purely a 1:1 structural
+conversion), and FR-006 ("write the generated subtitles to a subtitle file
+in a standard subtitle format") is satisfied by delegating composition and
+writing to `SubtitleFile` itself.
 
-An empty `Transcript.segments` list (FR-008's "no detectable speech" case)
-converts to a `SubtitleFile` with zero lines, which `SubtitleFile.compose()`
-already renders as an empty string rather than an error (T005) -- so this
-module needs no special case of its own for it. Surfacing that outcome to
-the user as a clear stderr notice is the T013 pipeline's job, not this
-module's.
+`transcript_to_subtitle_file()` and `write_subtitles()` are the two entry
+points:
 
-`write_subtitle_file()` is the entry point most callers need: build the
-`SubtitleFile` and write it to `output_path` in one call.
-`build_subtitle_file()` is exposed separately for callers that need the
-in-memory `SubtitleFile` before (or without) it being written -- e.g. User
-Story 2's `--review` flow (T020), which writes a draft, lets the user edit
-it, then re-reads and re-writes it with `edited` flags set.
+- `transcript_to_subtitle_file()` builds the `SubtitleFile` in memory only
+  (no disk I/O) -- useful for callers (or tests) that want to inspect or
+  further edit the result before writing, e.g. User Story 2's review step,
+  which writes the *draft* itself but needs to re-derive `SubtitleLine`
+  identity/timings the same way.
+- `write_subtitles()` does the same conversion and then writes it to
+  `output_path` in one call, returning the written `SubtitleFile` --
+  the entry point T013's pipeline orchestration uses.
+
+A `Transcript` with an empty `segments` list (FR-008's "no detectable
+speech" outcome, already validated as successful by T011) converts to a
+`SubtitleFile` with an empty `lines` list, which `SubtitleFile.compose()`
+already renders as an empty string rather than an error -- this module
+adds no special-casing of its own for that outcome.
 """
 
 from __future__ import annotations
@@ -30,26 +38,32 @@ from subtitles.models import SubtitleFile, SubtitleLine
 from transcription.transcribe import Transcript
 
 
-def build_subtitle_file(transcript: Transcript, output_path: Path | str) -> SubtitleFile:
-    """Convert `transcript` into an initial, not-yet-written `SubtitleFile`.
+def transcript_to_subtitle_file(
+    transcript: Transcript,
+    *,
+    output_path: Path | str | None = None,
+) -> SubtitleFile:
+    """Convert `transcript` into a fresh, unwritten `SubtitleFile`.
 
-    Each `TranscriptSegment` becomes one `SubtitleLine`, in the same order,
-    with a 1-based `index` matching its position in `transcript.segments`
-    (data-model.md — SubtitleLine.index: "1-based line number in the .srt
-    file"). No line splitting/merging happens here -- v1's subtitle lines
-    are exactly the ASR engine's own segment boundaries (spec FR-003).
+    Each `TranscriptSegment` becomes exactly one `SubtitleLine`, in order,
+    1-based-indexed by its position in `transcript.segments`
+    (data-model.md: SubtitleLine "initially derived 1:1 from a
+    TranscriptSegment"; SubtitleFile.lines "Ordered by index"). Every
+    produced line has `edited=False` -- these are freshly generated lines,
+    not yet subject to any User Story 2 review edit.
 
     Args:
-        transcript: An already-produced `Transcript` (T011). An empty
-            `segments` list is valid (FR-008) and produces a `SubtitleFile`
-            with an empty `lines` list.
-        output_path: Where the returned `SubtitleFile` will be written if
-            `.write()` is later called on it with no explicit path.
+        transcript: The time-coded ASR output to convert (T011).
+        output_path: Recorded on the returned `SubtitleFile` as its
+            `output_path` (data-model.md), but nothing is written to disk
+            here -- see `write_subtitles()` for the write-through entry
+            point.
 
     Returns:
-        A `SubtitleFile` referencing `transcript.source_video`, with
-        `format="srt"` (data-model.md's only supported v1 format) and
-        `lines` derived 1:1 from `transcript.segments`.
+        A `SubtitleFile` referencing `transcript.source_video`, with one
+        `SubtitleLine` per `TranscriptSegment` (empty `lines` when
+        `transcript.segments` is empty -- FR-008's valid "no detectable
+        speech" outcome).
     """
     lines = [
         SubtitleLine(
@@ -63,22 +77,26 @@ def build_subtitle_file(transcript: Transcript, output_path: Path | str) -> Subt
     return SubtitleFile(
         source_video=transcript.source_video,
         lines=lines,
-        output_path=Path(output_path),
+        output_path=Path(output_path) if output_path is not None else None,
     )
 
 
-def write_subtitle_file(transcript: Transcript, output_path: Path | str) -> SubtitleFile:
-    """Build a `SubtitleFile` from `transcript` and write it to `output_path`.
+def write_subtitles(transcript: Transcript, output_path: Path | str) -> SubtitleFile:
+    """Convert `transcript` to a `SubtitleFile` and write it to `output_path`.
+
+    The single entry point T013's pipeline orchestration uses to turn a
+    finished `Transcript` into the `.srt` file on disk (spec FR-006).
 
     Args:
-        transcript: An already-produced `Transcript` (T011).
-        output_path: Where to write the composed `.srt` text (spec FR-006).
-            Parent directories are created as needed (`SubtitleFile.write`).
+        transcript: The time-coded ASR output to convert (T011).
+        output_path: Where to write the composed `.srt` text. Parent
+            directories are created as needed (`SubtitleFile.write`).
 
     Returns:
-        The written `SubtitleFile`, ready for User Story 2's optional
-        review step (FR-009, FR-010) to read back and re-write with edits.
+        The `SubtitleFile` that was written, with `output_path` set to the
+        resolved `Path` it was written to -- callers don't need to track
+        the path separately.
     """
-    subtitle_file = build_subtitle_file(transcript, output_path)
+    subtitle_file = transcript_to_subtitle_file(transcript, output_path=output_path)
     subtitle_file.write()
     return subtitle_file
