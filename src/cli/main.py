@@ -28,11 +28,23 @@ import typer
 from cli import pipeline
 from lib.errors import WhisperFlowError
 
+# ruff: noqa: E501
+BANNER = r""" __          ___     _                     ______ _
+\ \        / / |   (_)                   |  ____| |
+ \ \  /\  / /| |__  _ ___ _ __   ___ _ __| |__  | | _____      __
+  \ \/  \/ / | '_ \| / __| '_ \ / _ \ '__|  __| | |/ _ \ \ /\ / /
+    \  /\  /  | | | | \__ \ |_) |  __/ |  | |    | | (_) \ V  V /
+     \/  \/   |_| |_|_|___/ .__/ \___|_|  |_|    |_|\___/ \_/\_/
+                                 | |
+                                 |_|"""
+HELP_BANNER = BANNER.replace("\n", "\n\n")
+
 app = typer.Typer(
     name="whisperflow",
-    help="Generate time-synced .srt subtitles from a video's spoken audio.",
+    help=f"{HELP_BANNER}\n\nGenerate time-synced .srt subtitles from a video's spoken audio.",
     add_completion=False,
     no_args_is_help=True,
+    context_settings={"max_content_width": 220},
 )
 
 
@@ -102,7 +114,9 @@ def _run_pipeline(
     )
 
 
-@app.command()
+@app.command(
+    help=f"{HELP_BANNER}\n\nTranscribe VIDEO_PATH's spoken audio into a time-synced .srt file."
+)
 def transcribe(
     video_path: Path = typer.Argument(
         ...,
@@ -145,7 +159,6 @@ def transcribe(
         ),
     ),
 ) -> None:
-    """Transcribe VIDEO_PATH's spoken audio into a time-synced .srt file."""
     resolved_output = output if output is not None else _default_output_path(video_path)
     resolved_editor = editor if editor is not None else _default_editor()
 
