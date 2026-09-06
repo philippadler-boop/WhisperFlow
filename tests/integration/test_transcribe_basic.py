@@ -16,11 +16,15 @@ Blocked on T012/T013/T014 (issues #12, #13, #14): `src/subtitles/writer.py`,
 into `main` yet, so `whisperflow transcribe` still raises `NotImplementedError`
 for any real invocation (see
 ``tests/unit/test_cli_main.py::test_transcribe_calls_not_yet_implemented_pipeline``).
-This test is written now against the intended end-to-end behavior and marked
-`xfail(strict=False)` so it doesn't block CI while those tasks land; it's
-expected to flip to XPASS once they do, at which point the marker below
-should be removed (and, per `strict=False`, an XPASS is not itself a failure
-in the meantime).
+This test is written now against the intended end-to-end behavior. Rather
+than a blanket `xfail(strict=False)` on the whole test (which would also
+swallow assertion failures, model-load failures, and malformed output once
+T012-T014 land), the test runs the CLI invocation first and only calls
+`pytest.xfail(...)` if the *specific*, currently-known `NotImplementedError`
+is what came back; any other outcome -- including a wrong/broken
+implementation once the pipeline is wired up -- fails the test normally.
+Once T012/T013/T014 land, this test should simply start passing and the
+`NotImplementedError` special-case below can be deleted in a follow-up.
 """
 
 from __future__ import annotations
@@ -34,22 +38,16 @@ from typer.testing import CliRunner
 
 from cli.main import app
 
-pytestmark = pytest.mark.xfail(
-    reason=(
-        "blocked on #12/#13/#14: whisperflow transcribe's pipeline "
-        "(src/subtitles/writer.py, src/cli/pipeline.py, and its CLI wiring "
-        "into src/cli/main.py) isn't implemented/merged yet -- transcribe "
-        "currently raises NotImplementedError for any real invocation"
-    ),
-    strict=False,
-)
-
-# Known properties of tests/fixtures/clear_speech.mp4 (see
-# tests/unit/test_transcribe.py's own real-model sanity check, which this
-# mirrors at the CLI/integration level rather than the transcription-module
-# level).
-_KNOWN_DURATION_SECONDS = 3.49
-_KNOWN_SPOKEN_WORD = "test"
+# Known real-transcription ground truth for tests/fixtures/clear_speech.mp4,
+# captured from an actual (mocked-nothing) `faster-whisper` "tiny" run against
+# this exact fixture (see docs/validation/T011.md): a single segment,
+# start=0.000 end=3.200, text "Hello, this is a test on the whisper flow
+# sub-title generator." Used below with reasonable tolerance so the timing
+# assertions actually discriminate a correctly time-synced result from, e.g.,
+# a single dummy subtitle block spanning the whole ~3.49s clip.
+_KNOWN_SEGMENT_START_SECONDS = 0.0
+_KNOWN_SEGMENT_END_SECONDS = 3.2
+_KNOWN_SPOKEN_WORDS = ("hello", "test", "whisper")
 
 
 def test_clear_speech_video_produces_correct_time_synced_srt(
@@ -68,6 +66,15 @@ def test_clear_speech_video_produces_correct_time_synced_srt(
 
     result = cli_runner.invoke(app, ["transcribe", str(video_path), "--no-review"])
 
+    if isinstance(result.exception, NotImplementedError):
+        pytest.xfail(
+            "blocked on #12/#13/#14: whisperflow transcribe's pipeline "
+            "(src/subtitles/writer.py, src/cli/pipeline.py, and its CLI "
+            "wiring into src/cli/main.py) isn't implemented/merged yet -- "
+            "transcribe currently raises NotImplementedError for any real "
+            "invocation"
+        )
+
     assert result.exit_code == 0, result.output
     assert expected_srt_path.is_file(), "expected .srt file was not created"
 
@@ -77,15 +84,19 @@ def test_clear_speech_video_produces_correct_time_synced_srt(
     # Text matches what's spoken in the fixture, in the original language
     # (no translation -- FR-003).
     joined_text = " ".join(subtitle.content for subtitle in subtitles).lower()
-    assert _KNOWN_SPOKEN_WORD in joined_text
+    for word in _KNOWN_SPOKEN_WORDS:
+        assert word in joined_text, f"expected spoken word {word!r} in {joined_text!r}"
 
     # Timings line up with the audio: ordered, each block's end >= its
-    # start, and within the fixture's known ~3.49s duration.
+    # start, and the overall span matches the known real-transcription
+    # ground truth for this fixture (not just "somewhere within the whole
+    # clip duration", which wouldn't catch e.g. a single dummy subtitle
+    # spanning the entire ~3.49s video).
     starts = [subtitle.start.total_seconds() for subtitle in subtitles]
     ends = [subtitle.end.total_seconds() for subtitle in subtitles]
     assert starts == sorted(starts), "subtitle blocks must be time-ordered"
     assert all(
         end >= start for start, end in zip(starts, ends, strict=True)
     ), "each subtitle block's end must be >= its start"
-    assert starts[0] == pytest.approx(0.0, abs=0.5)
-    assert ends[-1] <= _KNOWN_DURATION_SECONDS + 0.5
+    assert starts[0] == pytest.approx(_KNOWN_SEGMENT_START_SECONDS, abs=0.3)
+    assert ends[-1] == pytest.approx(_KNOWN_SEGMENT_END_SECONDS, abs=0.3)
