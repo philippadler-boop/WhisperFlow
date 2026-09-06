@@ -43,6 +43,7 @@ from pathlib import Path
 
 from audio.video_probe import Video
 from lib.errors import AudioExtractionError, FfmpegNotFoundError
+from lib.runtime import find_bundled_executable
 
 #: The `ffmpeg` binary extraction shells out to (the sibling of T009's
 #: `ffprobe`, from the same distribution; research.md's Audio extraction
@@ -106,7 +107,8 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
             move) -- never a raw `OSError`/`shutil.Error` (PR #85
             review).
     """
-    if shutil.which(FFMPEG_EXECUTABLE) is None:
+    ffmpeg_path = find_bundled_executable(FFMPEG_EXECUTABLE)
+    if ffmpeg_path is None:
         raise FfmpegNotFoundError(FFMPEG_EXECUTABLE)
 
     # ffmpeg always writes to a fresh, auto-generated temp path -- never
@@ -127,7 +129,7 @@ def extract_audio(video: Video, output_path: Path | str | None = None) -> AudioT
     try:
         result = subprocess.run(
             [
-                FFMPEG_EXECUTABLE,
+                ffmpeg_path,
                 "-y",
                 "-i",
                 str(video.path),

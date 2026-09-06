@@ -1,0 +1,24 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="WhisperFlow" Manufacturer="WhisperFlow" Version="$(var.Version)"
+           UpgradeCode="9F8DB694-0391-416D-96AF-D8CECB333820" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of WhisperFlow is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFilesFolder">
+      <Directory Id="INSTALLFOLDER" Name="WhisperFlow">
+        <Component Id="ApplicationFiles" Bitness="always64">
+          <Files Include="$(var.PublishDir)\**" />
+        </Component>
+        <Component Id="PathRegistration" Bitness="always64">
+          <Environment Id="WhisperFlowPath" Name="PATH" Value="[INSTALLFOLDER]"
+                       Part="last" Action="set" System="yes" Permanent="no" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="WhisperFlow" Level="1">
+      <ComponentRef Id="ApplicationFiles" />
+      <ComponentRef Id="PathRegistration" />
+    </Feature>
+  </Package>
+</Wix>

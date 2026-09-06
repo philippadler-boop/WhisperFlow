@@ -19,7 +19,6 @@ rather than letting a raw `subprocess`/JSON exception leak to the caller.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +31,7 @@ from lib.errors import (
     MaxDurationExceededError,
     UnsupportedVideoFormatError,
 )
+from lib.runtime import find_bundled_executable
 
 #: The `ffprobe` binary probing shells out to (part of the `ffmpeg`
 #: distribution; research.md's Audio extraction decision covers both).
@@ -116,13 +116,14 @@ def _run_ffprobe(video_path: Path) -> dict[str, Any]:
     `FfmpegNotFoundError` since its remediation ("install ffmpeg") differs
     from every other case here.
     """
-    if shutil.which(FFPROBE_EXECUTABLE) is None:
+    ffprobe_path = find_bundled_executable(FFPROBE_EXECUTABLE)
+    if ffprobe_path is None:
         raise FfmpegNotFoundError(FFPROBE_EXECUTABLE)
 
     try:
         result = subprocess.run(
             [
-                FFPROBE_EXECUTABLE,
+                ffprobe_path,
                 "-v",
                 "error",
                 "-print_format",

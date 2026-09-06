@@ -19,6 +19,9 @@ dependencies = [
 dev = [
     "pytest",
 ]
+packaging = [
+    "pyinstaller>=6",
+]
 
 [project.scripts]
 whisperflow = "cli.main:app"

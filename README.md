@@ -137,3 +137,24 @@ Run the test suite from the repository root:
 python -m pytest
 python -m ruff check .
 ```
+
+## Windows Installer Build
+
+The Windows release is built as a PyInstaller one-directory application and
+then packaged as an MSI with WiX. The MSI bundles Python dependencies plus
+`ffmpeg.exe` and `ffprobe.exe`, so end users do not need a Python or FFmpeg
+installation. Models are intentionally not bundled; faster-whisper manages
+them outside the read-only Program Files installation.
+
+On a Windows build machine, install PyInstaller and WiX, then supply an
+FFmpeg directory containing `ffmpeg.exe` and `ffprobe.exe`:
+
+```powershell
+python -m pip install -e ".[packaging]"
+winget install WiXToolset.WiXToolset
+.\scripts\build-windows-msi.ps1 -FfmpegDirectory C:\tools\ffmpeg\bin
+```
+
+The resulting installer is written to `dist\WhisperFlow-<version>.msi`.
+Test it in Windows Sandbox or a clean virtual machine without Python or FFmpeg
+installed before release.
