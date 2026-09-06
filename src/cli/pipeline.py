@@ -67,7 +67,7 @@ def run_pipeline(
     video_path: Path | str,
     output_path: Path | str,
     model_size: str,
-    stream: TextIO = sys.stderr,
+    stream: TextIO | None = None,
 ) -> SubtitleFile:
     """Run the full probe -> extract -> transcribe -> write sequence.
 
@@ -95,6 +95,9 @@ def run_pipeline(
             (transcription). Never caught or reported here -- see this
             module's docstring.
     """
+    if stream is None:
+        stream = sys.stderr
+
     resolved_video_path = Path(video_path)
     resolved_output_path = Path(output_path)
 
