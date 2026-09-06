@@ -24,13 +24,50 @@ from enum import StrEnum
 from pathlib import Path
 
 import typer
+from rich.align import Align
+from rich.console import Console
+from rich.text import Text
+from typer.core import TyperGroup
 
 from cli import pipeline
 from lib.errors import WhisperFlowError
 
+BANNER = """
+██╗    ██╗██╗  ██╗██╗███████╗██████╗ ███████╗██████╗ ███████╗██╗      ██████╗
+██║    ██║██║  ██║██║██╔════╝██╔══██╗██╔════╝██╔══██╗██╔════╝██║     ██╔═══██╗
+██║ █╗ ██║███████║██║███████╗██████╔╝█████╗  ██████╔╝█████╗  ██║     ██║   ██║
+██║███╗██║██╔══██║██║╚════██║██╔═══╝ ██╔══╝  ██╔══██╗██╔══╝  ██║     ██║   ██║
+╚███╔███╔╝██║  ██║██║███████║██║     ███████╗██║  ██║██║     ███████╗╚██████╔╝
+ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝
+"""
+TAGLINE = "Local video-to-subtitle transcription"
+console = Console(highlight=False)
+
+
+class BannerGroup(TyperGroup):
+    """Render the WhisperFlow banner before root help."""
+
+    def format_help(self, ctx, formatter) -> None:
+        show_banner()
+        super().format_help(ctx, formatter)
+
+
+def show_banner() -> None:
+    """Display the colored banner and tagline."""
+    colors = ["bright_magenta", "magenta", "dark_orange", "gold3", "gold1", "bright_white"]
+    styled_banner = Text()
+    for line, color in zip(BANNER.strip("\n").splitlines(), colors, strict=False):
+        styled_banner.append(line + "\n", style=color)
+    styled_banner.no_wrap = True
+    console.print(Align.center(styled_banner), overflow="ignore", crop=False)
+    console.print(Align.center(Text(TAGLINE, style="italic bright_yellow")))
+    console.print()
+
+
 app = typer.Typer(
     name="whisperflow",
     help="Generate time-synced .srt subtitles from a video's spoken audio.",
+    cls=BannerGroup,
     add_completion=False,
     no_args_is_help=True,
 )
