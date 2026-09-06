@@ -77,7 +77,7 @@ def test_unsupported_input_fails_with_clear_error(
     error_lines = [line for line in result.stderr.splitlines() if line.strip()]
     assert len(error_lines) == 1
     assert error_lines[0].startswith("Error: ")
-    assert "unsupported" in error_lines[0].lower()
+    assert "supported video format" in error_lines[0].lower()
     assert "video" in error_lines[0].lower()
     assert not output_path.exists()
 
