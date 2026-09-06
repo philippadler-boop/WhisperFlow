@@ -389,6 +389,26 @@ class TestProbeVideoMocked:
         with pytest.raises(FfmpegNotFoundError):
             probe_video(video_path)
 
+    def test_ffprobe_unlaunchable_raises_unsupported_format_not_raw_oserror(
+        self, monkeypatch, tmp_path: Path
+    ):
+        # ffprobe IS on PATH (shutil.which finds it), but subprocess can't
+        # actually launch it -- e.g. PermissionError on a blocked/
+        # non-executable binary, or a corrupt/wrong-architecture binary
+        # (surfaces as a plain OSError). This must never leak past
+        # probe_video() as a raw OSError (ADR 0002's subprocess-wrapper
+        # contract) and must not be reported as FfmpegNotFoundError either,
+        # since that error's "install ffmpeg" remediation would be wrong.
+        def _raise_permission_error(*args, **kwargs):
+            raise PermissionError("[Errno 13] Permission denied: 'ffprobe'")
+
+        monkeypatch.setattr(subprocess, "run", _raise_permission_error)
+        video_path = tmp_path / "clip.mp4"
+        video_path.touch()
+
+        with pytest.raises(UnsupportedVideoFormatError):
+            probe_video(video_path)
+
     def test_accepts_str_path_as_well_as_path_object(self, monkeypatch, tmp_path: Path):
         video_path = tmp_path / "clip.mp4"
         video_path.touch()

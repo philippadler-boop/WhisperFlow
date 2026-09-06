@@ -1,22 +1,17 @@
 """Unit tests for pipeline orchestration (T013, spec FR-008, FR-011).
 
 Covers `run_pipeline()`'s happy path (probe -> extract -> transcribe ->
-write, with per-stage stderr announcements and Transcribing-stage
-percentage progress via T006), both flavors of FR-008's "no detectable
-speech" case (an audio track that simply has no speech in it, and no
-audio track at all), propagation of each stage's `WhisperFlowError`
-subclasses (with a matching `Error: ...` stderr line and a `Failed` job),
-cleanup of the pipeline's own temporary extracted-audio file, that the
-returned `PipelineResult.reporter` lets a caller advance a successful run's
-job to a terminal stage, and that an output-write `OSError` is translated
-into `SubtitleWriteError` (reported and re-raised like any other failure,
-with temp-audio cleanup still happening).
+write, each stage announced on stderr via T006's `ProgressReporter`), the
+FR-008 "no detectable speech" stderr notice for an empty transcript,
+temporary-audio-file cleanup, and that every domain error a stage raises
+(`lib.errors.WhisperFlowError` and its subclasses) propagates unmodified
+rather than being caught/reported here -- reporting is T014's job, once,
+at the CLI's top level.
 
-All of `probe_video`, `extract_audio`, and `transcribe_audio` are
-monkeypatched at `cli.pipeline`'s own module level -- this module cares
-about *orchestration*, not re-testing those units' own internals (already
-covered by `tests/unit/test_video_probe.py`, `tests/unit/test_extract.py`,
-`tests/unit/test_transcribe.py`).
+Each stage function (`probe_video`, `extract_audio`, `transcribe_audio`,
+`write_subtitles`) is monkeypatched at its `cli.pipeline`-local name, the
+same pattern `tests/unit/test_extract.py`/`test_transcribe.py` use for
+their own single external seam (there, `subprocess.run`/`WhisperModel`).
 """
 
 from __future__ import annotations
@@ -29,8 +24,6 @@ import pytest
 import cli.pipeline as pipeline_module
 from audio.extract import AudioTrack
 from audio.video_probe import Video
-from cli.pipeline import PipelineResult, run_pipeline
-from cli.progress import Stage
 from lib.errors import (
     AudioExtractionError,
     FfmpegNotFoundError,
@@ -39,432 +32,479 @@ from lib.errors import (
     TranscriptionError,
     UnsupportedVideoFormatError,
 )
+from subtitles.models import SubtitleFile
 from transcription.transcribe import Transcript, TranscriptSegment
 
 
-def _video(tmp_path: Path, *, has_audio_track: bool = True, duration: float = 10.0) -> Video:
-    video_path = tmp_path / "clip.mp4"
-    video_path.touch()
+def _video(
+    tmp_path: Path, duration_seconds: float = 10.0, has_audio_track: bool = True
+) -> Video:
     return Video(
-        path=video_path,
+        path=tmp_path / "clip.mp4",
         container_format="mp4",
-        duration_seconds=duration,
+        duration_seconds=duration_seconds,
         has_audio_track=has_audio_track,
     )
 
 
-def _patch_probe(monkeypatch: pytest.MonkeyPatch, video: Video) -> None:
-    monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
-
-
-def _patch_extract(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, video: Video) -> Path:
+def _audio_track(tmp_path: Path, video: Video) -> AudioTrack:
     wav_path = tmp_path / "extracted.wav"
     wav_path.write_bytes(b"RIFF....WAVEfmt ")
-
-    def _extract(v):
-        return AudioTrack(source_video=v, extracted_path=wav_path)
-
-    monkeypatch.setattr(pipeline_module, "extract_audio", _extract)
-    return wav_path
+    return AudioTrack(source_video=video, extracted_path=wav_path)
 
 
-def _patch_transcribe(
-    monkeypatch: pytest.MonkeyPatch,
-    segments: list[TranscriptSegment],
-    *,
-    language: str = "en",
-) -> None:
-    def _transcribe(audio_track, *, model_size, on_segment=None):
-        for segment in segments:
-            if on_segment is not None:
-                on_segment(segment)
-        return Transcript(
-            source_video=audio_track.source_video, language=language, segments=segments
-        )
-
-    monkeypatch.setattr(pipeline_module, "transcribe_audio", _transcribe)
+def _transcript(video: Video, segments: list[TranscriptSegment] | None = None) -> Transcript:
+    return Transcript(source_video=video, language="en", segments=segments or [])
 
 
 class TestRunPipelineHappyPath:
-    def test_returns_pipeline_result_with_written_subtitle_file(
+    def test_runs_all_stages_and_returns_written_subtitle_file(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
+    ) -> None:
         video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(
-            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(
+            video,
+            [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="Hello")],
         )
         output_path = tmp_path / "out.srt"
+        write_calls: list[tuple[Transcript, Path]] = []
 
-        result = run_pipeline(
-            video.path, output_path, progress_stream=io.StringIO()
+        def _fake_write_subtitles(transcript_arg, output_path_arg):
+            write_calls.append((transcript_arg, Path(output_path_arg)))
+            subtitle_file = SubtitleFile(source_video=video, output_path=Path(output_path_arg))
+            subtitle_file.write()
+            return subtitle_file
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
         )
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _fake_write_subtitles)
 
-        assert isinstance(result, PipelineResult)
-        assert result.has_speech is True
-        assert output_path.is_file()
-        assert "hi" in output_path.read_text(encoding="utf-8")
-        assert result.subtitle_file.output_path == output_path
-
-    def test_announces_expected_stages_in_order(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(
-            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
-        )
         stream = io.StringIO()
+        result = pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=output_path,
+            model_size="base",
+            stream=stream,
+        )
 
-        run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
-
+        assert result.output_path == output_path
+        assert write_calls == [(transcript, output_path)]
         output = stream.getvalue()
-        assert output.index("Extracting audio…") < output.index("Transcribing…")
-        assert output.index("Transcribing…") < output.index("Writing subtitles…")
+        assert "Extracting audio…" in output
+        assert "Transcribing…" in output
+        assert "Writing subtitles…" in output
+        assert "Done." in output
 
-    def test_reports_transcribing_progress_via_on_segment(
+    def test_reports_progress_via_on_segment_callback(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path, duration=10.0)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(
-            monkeypatch,
-            [
-                TranscriptSegment(start_seconds=0.0, end_seconds=5.0, text="half"),
-            ],
-        )
-        stream = io.StringIO()
+    ) -> None:
+        video = _video(tmp_path, duration_seconds=100.0)
+        audio_track = _audio_track(tmp_path, video)
+        segment = TranscriptSegment(start_seconds=0.0, end_seconds=50.0, text="Halfway")
 
-        run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
+        def _fake_transcribe_audio(track, *, model_size, on_segment=None):
+            if on_segment is not None:
+                on_segment(segment)
+            return _transcript(video, [segment])
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _fake_transcribe_audio)
+        monkeypatch.setattr(
+            pipeline_module,
+            "write_subtitles",
+            lambda transcript, output_path: SubtitleFile(
+                source_video=video, output_path=Path(output_path)
+            ),
+        )
+
+        stream = io.StringIO()
+        pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=tmp_path / "out.srt",
+            model_size="base",
+            stream=stream,
+        )
 
         assert "50.0%" in stream.getvalue()
 
-    def test_passes_model_size_through_to_transcribe_audio(
+    def test_no_speech_detected_prints_clear_stderr_notice(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
+    ) -> None:
         video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        captured: dict[str, object] = {}
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(video, segments=[])
 
-        def _transcribe(audio_track, *, model_size, on_segment=None):
-            captured["model_size"] = model_size
-            return Transcript(source_video=audio_track.source_video, language="en", segments=[])
-
-        monkeypatch.setattr(pipeline_module, "transcribe_audio", _transcribe)
-
-        run_pipeline(
-            video.path,
-            tmp_path / "out.srt",
-            model_size="small",
-            progress_stream=io.StringIO(),
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
+        )
+        monkeypatch.setattr(
+            pipeline_module,
+            "write_subtitles",
+            lambda transcript_arg, output_path: SubtitleFile(
+                source_video=video, output_path=Path(output_path)
+            ),
         )
 
-        assert captured["model_size"] == "small"
-
-    def test_cleans_up_temporary_extracted_audio_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        wav_path = _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(monkeypatch, [])
-
-        run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())
-
-        assert not wav_path.exists()
-
-    def test_returned_reporter_can_complete_the_job_to_a_terminal_stage(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        # run_pipeline() itself only ever takes the job as far as
-        # WritingSubtitles (the --review/--no-review branching into
-        # AwaitingReview/Done is T014/T021's call, not this module's) --
-        # but the caller must actually be able to reach one of those
-        # terminal stages using what run_pipeline() gives back, or every
-        # successful run would leave its job stranded forever.
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(
-            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
-        )
-
-        result = run_pipeline(
-            video.path, tmp_path / "out.srt", progress_stream=io.StringIO()
-        )
-
-        assert result.reporter.job.stage == Stage.WRITING_SUBTITLES
-        assert result.reporter.job.is_terminal is False
-
-        result.reporter.announce_stage(Stage.DONE)
-
-        assert result.reporter.job.stage == Stage.DONE
-        assert result.reporter.job.is_terminal is True
-
-
-class TestRunPipelineNoSpeechDetected:
-    def test_audio_track_with_zero_segments_is_a_successful_run(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path, has_audio_track=True)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(monkeypatch, [])
-        output_path = tmp_path / "out.srt"
         stream = io.StringIO()
+        pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=tmp_path / "out.srt",
+            model_size="base",
+            stream=stream,
+        )
 
-        result = run_pipeline(video.path, output_path, progress_stream=stream)
+        assert pipeline_module.NO_SPEECH_DETECTED_MESSAGE in stream.getvalue()
 
-        assert result.has_speech is False
-        assert output_path.is_file()
-        assert output_path.read_text(encoding="utf-8") == ""
-        assert "No speech detected" in stream.getvalue()
-
-    def test_no_audio_track_at_all_skips_extraction_and_transcription(
+    def test_no_speech_notice_absent_when_speech_detected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
+    ) -> None:
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(
+            video, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="Hi")]
+        )
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
+        )
+        monkeypatch.setattr(
+            pipeline_module,
+            "write_subtitles",
+            lambda transcript_arg, output_path: SubtitleFile(
+                source_video=video, output_path=Path(output_path)
+            ),
+        )
+
+        stream = io.StringIO()
+        pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=tmp_path / "out.srt",
+            model_size="base",
+            stream=stream,
+        )
+
+        assert pipeline_module.NO_SPEECH_DETECTED_MESSAGE not in stream.getvalue()
+
+    def test_cleans_up_temporary_audio_file_after_success(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(video, segments=[])
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
+        )
+        monkeypatch.setattr(
+            pipeline_module,
+            "write_subtitles",
+            lambda transcript_arg, output_path: SubtitleFile(
+                source_video=video, output_path=Path(output_path)
+            ),
+        )
+
+        assert audio_track.extracted_path.exists()
+        pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=tmp_path / "out.srt",
+            model_size="base",
+            stream=io.StringIO(),
+        )
+
+        assert not audio_track.extracted_path.exists()
+
+
+class TestRunPipelineNoAudioTrack:
+    """FR-008's stronger case: `Video.has_audio_track is False`.
+
+    Distinct from the "no detectable speech" tests above (which fake an
+    empty transcript from a video that *does* have an audio track) --
+    here there is no audio track at all, so `extract_audio()`/
+    `transcribe_audio()` must never even be called: `extract_audio()` has
+    nothing to map to its output for a video like this and would only
+    ever raise `AudioExtractionError`, turning FR-008's documented
+    successful outcome into a fatal, exit-code-1 error (P1 review).
+    """
+
+    def test_skips_extraction_and_transcription_and_exits_successfully(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         video = _video(tmp_path, has_audio_track=False)
-        _patch_probe(monkeypatch, video)
+        output_path = tmp_path / "out.srt"
+        extract_calls: list[Video] = []
+        transcribe_calls: list[object] = []
 
-        def _boom_extract(v):
-            raise AssertionError("extract_audio should not be called when has_audio_track=False")
+        def _fake_extract_audio(v):
+            extract_calls.append(v)
+            raise AssertionError("extract_audio must not be called when has_audio_track is False")
 
-        def _boom_transcribe(*args, **kwargs):
+        def _fake_transcribe_audio(track, **kwargs):
+            transcribe_calls.append(track)
             raise AssertionError(
-                "transcribe_audio should not be called when has_audio_track=False"
+                "transcribe_audio must not be called when has_audio_track is False"
             )
 
-        monkeypatch.setattr(pipeline_module, "extract_audio", _boom_extract)
-        monkeypatch.setattr(pipeline_module, "transcribe_audio", _boom_transcribe)
-        output_path = tmp_path / "out.srt"
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", _fake_extract_audio)
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _fake_transcribe_audio)
+
         stream = io.StringIO()
+        result = pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=output_path,
+            model_size="base",
+            stream=stream,
+        )
 
-        result = run_pipeline(video.path, output_path, progress_stream=stream)
-
-        assert result.has_speech is False
+        assert extract_calls == []
+        assert transcribe_calls == []
+        assert result.output_path == output_path
+        assert output_path.exists()
         assert output_path.read_text(encoding="utf-8") == ""
-        assert "No speech detected" in stream.getvalue()
+        output = stream.getvalue()
+        assert pipeline_module.NO_SPEECH_DETECTED_MESSAGE in output
+        assert "Done." in output
+        # P2 review: the job silently advanced through ExtractingAudio and
+        # Transcribing without announcing either -- a valid, no-audio-track
+        # video must still announce every stage it passes through, same as
+        # every other run, even though there is no actual work to do in them.
+        assert "Extracting audio…" in output
+        assert "Transcribing…" in output
+        assert "Writing subtitles…" in output
 
-    def test_no_speech_case_still_exits_successfully_not_via_report_failure(
+    def test_no_audio_track_writes_empty_srt_regardless_of_writer_stub(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
+    ) -> None:
         video = _video(tmp_path, has_audio_track=False)
-        _patch_probe(monkeypatch, video)
-        stream = io.StringIO()
+        write_calls: list[tuple[object, Path]] = []
 
-        run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
+        def _fake_write_subtitles(transcript_arg, output_path_arg):
+            write_calls.append((transcript_arg, Path(output_path_arg)))
+            subtitle_file = SubtitleFile(source_video=video, output_path=Path(output_path_arg))
+            subtitle_file.write()
+            return subtitle_file
 
-        assert "Error:" not in stream.getvalue()
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _fake_write_subtitles)
+
+        result = pipeline_module.run_pipeline(
+            video_path=video.path,
+            output_path=tmp_path / "out.srt",
+            model_size="base",
+            stream=io.StringIO(),
+        )
+
+        assert len(write_calls) == 1
+        transcript_arg, _ = write_calls[0]
+        assert transcript_arg.segments == []
+        assert result.output_path == tmp_path / "out.srt"
 
 
-class TestRunPipelineFailureModes:
-    def test_unsupported_format_reports_failure_and_reraises(
+class TestRunPipelineCleanupFailure:
+    """P2 review: temp-audio cleanup must be best-effort, never leaking a
+    raw `OSError` or masking a more important exception already
+    propagating.
+    """
+
+    def test_cleanup_failure_after_successful_transcription_raises_domain_error(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video_path = tmp_path / "clip.avi"
-        video_path.touch()
-
-        def _probe(path):
-            raise UnsupportedVideoFormatError(path, detected_format="avi")
-
-        monkeypatch.setattr(pipeline_module, "probe_video", _probe)
-        stream = io.StringIO()
-
-        with pytest.raises(UnsupportedVideoFormatError):
-            run_pipeline(video_path, tmp_path / "out.srt", progress_stream=stream)
-
-        assert "Error:" in stream.getvalue()
-        assert "unsupported video format" in stream.getvalue()
-
-    def test_ffmpeg_not_found_during_extraction_reports_failure_and_reraises(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
+    ) -> None:
         video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(
+            video, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="Hi")]
+        )
 
-        def _extract(v):
-            raise FfmpegNotFoundError("ffmpeg")
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
+        )
+        write_called = False
 
-        monkeypatch.setattr(pipeline_module, "extract_audio", _extract)
-        stream = io.StringIO()
+        def _fake_write_subtitles(transcript_arg, output_path_arg):
+            nonlocal write_called
+            write_called = True
+            return SubtitleFile(source_video=video, output_path=Path(output_path_arg))
 
-        with pytest.raises(FfmpegNotFoundError):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _fake_write_subtitles)
 
-        assert "Error:" in stream.getvalue()
+        def _raise_permission_error(self, missing_ok=False):
+            raise PermissionError("[Errno 13] Permission denied")
 
-    def test_audio_extraction_error_reports_failure_and_reraises(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-
-        def _extract(v):
-            raise AudioExtractionError(video.path, stderr="boom")
-
-        monkeypatch.setattr(pipeline_module, "extract_audio", _extract)
-        stream = io.StringIO()
+        monkeypatch.setattr(Path, "unlink", _raise_permission_error)
 
         with pytest.raises(AudioExtractionError):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
-
-        assert "Error:" in stream.getvalue()
-
-    def test_model_load_error_reports_failure_and_reraises(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-
-        def _transcribe(audio_track, *, model_size, on_segment=None):
-            raise ModelLoadError(model_size, reason="corrupt cache")
-
-        monkeypatch.setattr(pipeline_module, "transcribe_audio", _transcribe)
-        stream = io.StringIO()
-
-        with pytest.raises(ModelLoadError):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
-
-        assert "Error:" in stream.getvalue()
-
-    def test_transcription_error_reports_failure_and_reraises(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-
-        def _transcribe(audio_track, *, model_size, on_segment=None):
-            raise TranscriptionError(audio_track.extracted_path, reason="decode failed")
-
-        monkeypatch.setattr(pipeline_module, "transcribe_audio", _transcribe)
-        stream = io.StringIO()
-
-        with pytest.raises(TranscriptionError):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
-
-        assert "Error:" in stream.getvalue()
-
-    def test_no_output_file_left_behind_when_probing_fails(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        def _probe(path):
-            raise UnsupportedVideoFormatError(path, detected_format="avi")
-
-        monkeypatch.setattr(pipeline_module, "probe_video", _probe)
-        output_path = tmp_path / "out.srt"
-
-        with pytest.raises(UnsupportedVideoFormatError):
-            run_pipeline(
-                tmp_path / "clip.avi", output_path, progress_stream=io.StringIO()
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
             )
 
-        assert not output_path.exists()
+        # A cleanup failure after a fully successful transcription is this
+        # run's *only* failure -- it must still be reported, not silently
+        # swallowed -- but must not prevent the (already-successful) write
+        # stage from having run.
+        assert write_called is True
 
-    def test_cleans_up_temporary_extracted_audio_file_on_transcription_failure(
+    def test_cleanup_failure_during_failed_transcription_does_not_mask_primary_error(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
+    ) -> None:
         video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        wav_path = _patch_extract(monkeypatch, tmp_path, video)
+        audio_track = _audio_track(tmp_path, video)
 
-        def _transcribe(audio_track, *, model_size, on_segment=None):
-            raise TranscriptionError(audio_track.extracted_path, reason="decode failed")
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
 
-        monkeypatch.setattr(pipeline_module, "transcribe_audio", _transcribe)
+        def _raise_transcription_error(track, **kwargs):
+            raise TranscriptionError(track.extracted_path, reason="boom")
+
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _raise_transcription_error)
+
+        def _raise_permission_error(self, missing_ok=False):
+            raise PermissionError("[Errno 13] Permission denied")
+
+        monkeypatch.setattr(Path, "unlink", _raise_permission_error)
+
+        # The primary TranscriptionError must win -- a simultaneous cleanup
+        # failure must not replace it with an AudioExtractionError/raw
+        # PermissionError instead.
+        with pytest.raises(TranscriptionError, match="boom"):
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
+
+    def test_temp_audio_cleaned_up_when_write_subtitles_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """P2 review: `write_subtitles()` ran outside the temp-audio cleanup
+        block entirely -- an unwritable output directory, a full disk, or
+        any other writer failure left the extracted temporary WAV behind,
+        violating `AudioTrack.extracted_path`'s "removed after the run"
+        contract. Writing is now handled under the same unified cleanup as
+        transcription: the temp file must still be removed, and the
+        original writer exception must still be the one that propagates.
+        """
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+        transcript = _transcript(
+            video, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="Hi")]
+        )
+
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+        monkeypatch.setattr(
+            pipeline_module, "transcribe_audio", lambda track, **kwargs: transcript
+        )
+
+        def _raise_write_error(transcript_arg, output_path_arg):
+            raise SubtitleWriteError(output_path_arg, reason="No space left on device")
+
+        monkeypatch.setattr(pipeline_module, "write_subtitles", _raise_write_error)
+
+        assert audio_track.extracted_path.exists()
+        with pytest.raises(SubtitleWriteError, match="No space left on device"):
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
+
+        assert not audio_track.extracted_path.exists()
+
+
+class TestRunPipelinePropagatesDomainErrors:
+    def test_unsupported_format_from_probing_propagates(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def _raise(path):
+            raise UnsupportedVideoFormatError(path, detected_format="avi")
+
+        monkeypatch.setattr(pipeline_module, "probe_video", _raise)
+
+        with pytest.raises(UnsupportedVideoFormatError):
+            pipeline_module.run_pipeline(
+                video_path=tmp_path / "clip.avi",
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
+
+    def test_missing_ffmpeg_from_extraction_propagates(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path)
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+
+        def _raise(v):
+            raise FfmpegNotFoundError("ffmpeg")
+
+        monkeypatch.setattr(pipeline_module, "extract_audio", _raise)
+
+        with pytest.raises(FfmpegNotFoundError):
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
+
+    def test_model_load_error_from_transcription_propagates_and_still_cleans_up(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+
+        def _raise(track, **kwargs):
+            raise ModelLoadError("base", reason="boom")
+
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _raise)
+
+        with pytest.raises(ModelLoadError):
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )
+
+        assert not audio_track.extracted_path.exists()
+
+    def test_transcription_error_propagates(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        video = _video(tmp_path)
+        audio_track = _audio_track(tmp_path, video)
+        monkeypatch.setattr(pipeline_module, "probe_video", lambda path: video)
+        monkeypatch.setattr(pipeline_module, "extract_audio", lambda v: audio_track)
+
+        def _raise(track, **kwargs):
+            raise TranscriptionError(track.extracted_path, reason="boom")
+
+        monkeypatch.setattr(pipeline_module, "transcribe_audio", _raise)
 
         with pytest.raises(TranscriptionError):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())
-
-        assert not wav_path.exists()
-
-    def test_output_write_failure_is_reported_as_subtitle_write_error(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(
-            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
-        )
-
-        def _boom_write(transcript, output_path):
-            raise PermissionError("Permission denied")
-
-        monkeypatch.setattr(pipeline_module, "write_subtitles", _boom_write)
-        stream = io.StringIO()
-
-        with pytest.raises(SubtitleWriteError):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
-
-        assert "Error:" in stream.getvalue()
-        assert "Permission denied" in stream.getvalue()
-
-    def test_output_write_failure_still_cleans_up_temporary_extracted_audio_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        wav_path = _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(
-            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
-        )
-
-        def _boom_write(transcript, output_path):
-            raise OSError("disk full")
-
-        monkeypatch.setattr(pipeline_module, "write_subtitles", _boom_write)
-
-        with pytest.raises(SubtitleWriteError):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=io.StringIO())
-
-        assert not wav_path.exists()
-
-    def test_cleanup_failure_does_not_mask_transcription_failure(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-
-        def _raise_transcription(audio_track, *, model_size, on_segment=None):
-            raise TranscriptionError(audio_track.extracted_path, reason="decode failed")
-
-        def _raise_cleanup(*args, **kwargs):
-            raise PermissionError("audio file is locked")
-
-        monkeypatch.setattr(pipeline_module, "transcribe_audio", _raise_transcription)
-        monkeypatch.setattr(Path, "unlink", _raise_cleanup)
-        stream = io.StringIO()
-
-        with pytest.raises(TranscriptionError, match="decode failed"):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
-
-        assert "decode failed" in stream.getvalue()
-
-    def test_cleanup_failure_after_success_is_reported_as_audio_extraction_error(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        video = _video(tmp_path)
-        _patch_probe(monkeypatch, video)
-        _patch_extract(monkeypatch, tmp_path, video)
-        _patch_transcribe(
-            monkeypatch, [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hi")]
-        )
-
-        def _raise_cleanup(*args, **kwargs):
-            raise PermissionError("audio file is locked")
-
-        monkeypatch.setattr(Path, "unlink", _raise_cleanup)
-        stream = io.StringIO()
-
-        with pytest.raises(AudioExtractionError, match="audio file is locked"):
-            run_pipeline(video.path, tmp_path / "out.srt", progress_stream=stream)
-
-        assert "Error:" in stream.getvalue()
-        assert "audio file is locked" in stream.getvalue()
+            pipeline_module.run_pipeline(
+                video_path=video.path,
+                output_path=tmp_path / "out.srt",
+                model_size="base",
+                stream=io.StringIO(),
+            )

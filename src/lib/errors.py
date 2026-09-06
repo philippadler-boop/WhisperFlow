@@ -148,6 +148,14 @@ class AudioExtractionError(WhisperFlowError):
     rejected up front by probing, before extraction is ever attempted).
     Maps to CLI exit code 1 per contracts/cli.md's "ASR model failed to
     load"-adjacent fatal-error bucket.
+
+    Also raised by pipeline orchestration (T013, `src/cli/pipeline.py`)
+    when it fails to remove the temporary WAV file `extract_audio()`
+    produced, once transcription has otherwise finished -- a permission/
+    lock error there is still a failure of this same "the extracted audio
+    track couldn't be cleanly handled" family, and must surface through
+    this same single-line, exit-code-1 path rather than as a raw
+    unhandled `OSError`.
     """
 
     def __init__(self, path: str | Path, stderr: str = "") -> None:

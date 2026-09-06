@@ -1,205 +1,200 @@
 """Pipeline orchestration: probe -> extract -> transcribe -> write (T013).
 
-Wires video probing (T009, `src/audio/video_probe.py`), audio extraction
-(T010, `src/audio/extract.py`), `faster-whisper` transcription (T011,
-`src/transcription/transcribe.py`), and `.srt` writing (T012,
-`src/subtitles/writer.py`) into the single ordered pipeline described by
-spec User Story 1, driving per-stage progress reporting via T006's
-`ProcessingJob`/`ProgressReporter` (FR-011) along the way.
+Wires together every prior User Story 1 stage into the single, ordered
+sequence contracts/cli.md's Progress contract describes: probing the input
+video (T009), extracting its audio (T010), transcribing that audio (T011),
+and writing the result to a `.srt` file (T012) -- announcing each stage
+transition on stderr via T006's `ProgressReporter` as it goes (FR-011).
 
-`run_pipeline()` is the single entry point. It only takes a job through
-`ExtractingAudio` -> `Transcribing` -> `WritingSubtitles`
-(contracts/cli.md's Progress contract lists exactly these three stage
-announcements) -- the `--review`/`--no-review` branching that decides
-whether the job then moves to `AwaitingReview` or straight to `Done` is
-T014/T021's job (CLI wiring), not this module's, since this module has no
-knowledge of the `--review` flag at all.
+`run_pipeline()` is the single entry point T014's CLI wiring (`src/cli/
+main.py`) calls for the `--no-review` path. It deliberately does *not*
+catch or report any of the domain errors (`lib.errors.WhisperFlowError`
+subclasses) raised by the stages it calls -- probing an unsupported format
+or an over-length video, a missing `ffmpeg`/`ffprobe` binary, or a failed
+ASR model load/transcription all propagate straight out of this function.
+Reporting them (a single ``Error: ...`` line on stderr, exit code 1) is
+`src/cli/main.py`'s job, once, at the top level -- see contracts/cli.md's
+Exit codes section. This mirrors `src/audio/extract.py`/`src/transcription/
+transcribe.py`'s own pattern of raising a narrow set of typed errors rather
+than reporting them itself.
 
-Zero detectable speech (FR-008) is handled as a first-class *successful*
-outcome, not an error, in two different ways depending on *why* there's no
-speech:
+A video with no detectable speech (FR-008) is not an error: `transcribe_
+audio()` already returns that as a `Transcript` with an empty `segments`
+list, which converts and writes cleanly to an empty `.srt` file (T012).
+This module's only added behavior for that case is printing a clear,
+one-line stderr notice (`NO_SPEECH_DETECTED_MESSAGE`) so a `--no-review`
+run doesn't silently produce an empty file with no explanation, distinct
+from `ProgressReporter`'s own stage-transition lines.
 
-- The video has an audio track, but `faster-whisper` simply produces no
-  segments for it (silence, music-only, etc.) -- extraction and
-  transcription both run as normal; `transcribe_audio()` already returns
-  this as a `Transcript` with empty `segments` (T011).
-- The video has no audio track at all (`Video.has_audio_track` is
-  `False`) -- there's nothing for `ffmpeg`/`faster-whisper` to even
-  attempt, so extraction and transcription are skipped entirely in favor
-  of an empty `Transcript`, per `src/audio/video_probe.py`'s own
-  documented contract for that field ("`False` here triggers the FR-008
-  'no detectable speech' report").
-
-Either way, a `.srt` file with zero subtitle blocks is still written (per
-contracts/cli.md's Output contract) and a clear notice is printed to
-stderr via `ProgressReporter.report_notice()` -- the run still exits 0.
-
-Every other failure mode (`WhisperFlowError` and its subclasses, raised by
-probing/extraction/transcription for FR-007's unsupported-format/
-oversized-video/missing-ffmpeg/model-load cases) is reported to stderr via
-`ProgressReporter.report_failure()` (which also moves the job to `Failed`)
-and then re-raised, so the caller (T014) only has to decide the process
-exit code -- it doesn't need to print its own duplicate error line. An
-`OSError` from `SubtitleFile.write()` (T012) -- e.g. a non-writable output
-directory or a full disk -- is translated into `lib.errors.SubtitleWriteError`
-before it can reach that same handler, so output-write failures are
-reported identically rather than escaping as a raw traceback.
-
-`run_pipeline()` never itself advances the job past `WritingSubtitles` on a
-successful run -- as noted above, only T014/T021 knows whether `--review`
-means the next stop is `AwaitingReview` or `Done`. To make that handoff
-possible, the same `ProgressReporter` used throughout the run (wrapping the
-same `ProcessingJob`) is returned on `PipelineResult.reporter`, so T014 can
-complete the job's state machine (e.g.
-`result.reporter.announce_stage(Stage.DONE)`) instead of being left with no
-reference to it at all.
+A video with no audio track *at all* (`Video.has_audio_track is False`) is
+FR-008's stronger case (data-model.md: `has_audio_track` "False triggers
+the FR-008 'no detectable speech' report"), and is handled separately,
+*before* extraction/transcription are ever attempted: `extract_audio()`
+has nothing to map to its output for such a video and would only ever
+raise `AudioExtractionError` (see `src/audio/extract.py`'s own
+`test_no_audio_track_video_surfaces_as_extraction_error`, which documents
+that as this pipeline's concern, not extraction's) -- which would
+incorrectly turn a documented-successful outcome into a fatal, exit-code-1
+error. `run_pipeline()` instead skips straight to writing an empty
+subtitle file in that case.
 """
 
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from audio.extract import AudioTrack, extract_audio
+from audio.extract import extract_audio
 from audio.video_probe import probe_video
 from cli.progress import ProcessingJob, ProgressReporter, Stage
-from lib.errors import AudioExtractionError, SubtitleWriteError, WhisperFlowError
+from lib.errors import AudioExtractionError
 from subtitles.models import SubtitleFile
 from subtitles.writer import write_subtitles
-from transcription.transcribe import DEFAULT_MODEL_SIZE, Transcript, transcribe_audio
+from transcription.transcribe import Transcript, transcribe_audio
 
-
-@dataclass(frozen=True)
-class PipelineResult:
-    """The outcome of one `run_pipeline()` call.
-
-    Bundles the written `SubtitleFile` together with the `Transcript` it
-    was derived from, so a caller (T014) can both locate the output file
-    and inspect whether any speech was actually detected without having to
-    re-derive that from the file on disk. Also carries the `ProgressReporter`
-    (and, through it, the `ProcessingJob`) this run advanced, so T014 can
-    move the same job on to `AwaitingReview`/`Done` once it decides which
-    applies -- without this, the job would be stranded at `WritingSubtitles`
-    forever on every successful run.
-    """
-
-    subtitle_file: SubtitleFile
-    transcript: Transcript
-    reporter: ProgressReporter
-
-    @property
-    def has_speech(self) -> bool:
-        """`True` unless this run hit FR-008's "no detectable speech" case."""
-        return bool(self.transcript.segments)
+#: FR-008's "no detectable speech" stderr notice -- a `.srt` file with zero
+#: subtitle blocks is a valid, successful outcome (contracts/cli.md's
+#: Output contract), but printing nothing would look indistinguishable
+#: from a silent failure.
+NO_SPEECH_DETECTED_MESSAGE = (
+    "No speech detected in the input video -- wrote an empty subtitle file."
+)
 
 
 def run_pipeline(
+    *,
     video_path: Path | str,
     output_path: Path | str,
-    *,
-    model_size: str = DEFAULT_MODEL_SIZE,
-    progress_stream: TextIO = sys.stderr,
-) -> PipelineResult:
-    """Run the full probe -> extract -> transcribe -> write pipeline.
+    model_size: str,
+    stream: TextIO = sys.stderr,
+) -> SubtitleFile:
+    """Run the full probe -> extract -> transcribe -> write sequence.
 
     Args:
-        video_path: Path to the input video file (spec FR-001).
-        output_path: Where to write the resulting `.srt` file (spec FR-006).
+        video_path: Path to the input video file (FR-001).
+        output_path: Where to write the resulting `.srt` file (FR-006).
         model_size: `faster-whisper` model size (contracts/cli.md's
-            `--model`: tiny/base/small/medium/large).
-        progress_stream: Where per-stage/percentage progress and notices
-            are written (FR-011); defaults to `sys.stderr` per
-            contracts/cli.md's Progress contract. Tests pass an in-memory
-            stream (e.g. `io.StringIO()`) to assert on it without
-            capturing real stderr.
+            `--model`).
+        stream: Where stage/progress announcements (T006) and the
+            FR-008 no-speech notice are written. Defaults to `sys.stderr`
+            per contracts/cli.md's Progress contract; overridable for
+            tests.
 
     Returns:
-        A `PipelineResult` wrapping the written `SubtitleFile`, the
-        `Transcript` it came from -- `PipelineResult.has_speech` is
-        `False` exactly when FR-008's "no detectable speech" case applied
-        -- and the `ProgressReporter` (job still at `WritingSubtitles`)
-        this run used, so the caller can advance it the rest of the way.
+        The `SubtitleFile` that was written to `output_path`.
 
     Raises:
-        WhisperFlowError (or one of its subclasses from `lib/errors.py`):
-            any FR-007 failure -- unsupported/undetectable video format,
-            video exceeds the 2-hour maximum, `ffmpeg`/model not found or
-            failing, transcription failing partway through, or the output
-            `.srt` file failing to write (`SubtitleWriteError`). Before
-            re-raising, the failure is reported to `progress_stream` via
-            `ProgressReporter.report_failure()`.
+        lib.errors.WhisperFlowError: any of its subclasses, propagated
+            unmodified from probing, extraction, or transcription --
+            `UnsupportedVideoFormatError`/`MaxDurationExceededError`
+            (probing), `FfmpegNotFoundError` (probing or extraction),
+            `AudioExtractionError` (extraction, or a failure to clean up
+            the extracted temporary WAV file once transcription has
+            otherwise succeeded), or `ModelLoadError`/`TranscriptionError`
+            (transcription). Never caught or reported here -- see this
+            module's docstring.
     """
     resolved_video_path = Path(video_path)
     resolved_output_path = Path(output_path)
 
-    # The real video duration isn't known until probing succeeds; a
-    # placeholder of 0.0 is harmless in the meantime since
-    # ProcessingJob.percent_complete is only ever consulted once the job
-    # has reached Transcribing, by which point it's been refreshed below.
-    reporter = ProgressReporter(
-        ProcessingJob(video_duration_seconds=0.0), stream=progress_stream
-    )
+    # Probing determines the video's duration, which ProcessingJob needs up
+    # front (its percent_complete derivation divides by it) -- so it runs
+    # before the job/reporter even exist. Any of its FR-007 errors
+    # (unsupported format, oversized video, missing ffprobe) therefore
+    # propagate with no stage line ever printed, which is correct: nothing
+    # has started processing yet.
+    video = probe_video(resolved_video_path)
 
-    audio_track: AudioTrack | None = None
-    primary_error: BaseException | None = None
-    try:
-        video = probe_video(resolved_video_path)
-        reporter.job.video_duration_seconds = video.duration_seconds
+    job = ProcessingJob(video_duration_seconds=video.duration_seconds)
+    reporter = ProgressReporter(job, stream=stream)
 
+    if not video.has_audio_track:
+        # FR-008's stronger case: there is no audio track at all to even
+        # attempt extracting/transcribing (data-model.md: `has_audio_track`
+        # "False triggers the FR-008 'no detectable speech' report").
+        # extract_audio() has nothing to map to its output for a video like
+        # this and would only ever raise AudioExtractionError -- turning a
+        # documented-successful outcome into a fatal error -- so skip
+        # extraction/transcription entirely and write straight to an empty
+        # subtitle file. Every stage the job passes through -- including
+        # the ones with nothing to actually do -- is announced via the
+        # reporter itself (rather than advancing `job` directly), so
+        # stderr's stage announcements stay complete and consistent with
+        # every other run instead of silently skipping straight to
+        # "Writing subtitles…" (P2 review).
         reporter.announce_stage(Stage.EXTRACTING_AUDIO)
-        if video.has_audio_track:
-            audio_track = extract_audio(video)
-            reporter.announce_stage(Stage.TRANSCRIBING)
-            transcript = transcribe_audio(
-                audio_track,
-                model_size=model_size,
-                on_segment=lambda segment: reporter.report_progress(segment.end_seconds),
-            )
-        else:
-            # No audio track at all -- FR-008's "no detectable speech" case
-            # applies before there's anything for ffmpeg/faster-whisper to
-            # even attempt (src/audio/video_probe.py's documented contract
-            # for has_audio_track). Still announce Transcribing so stderr's
-            # stage sequence is uniform regardless of which branch ran.
-            reporter.announce_stage(Stage.TRANSCRIBING)
-            transcript = Transcript(source_video=video, language="", segments=[])
-
+        reporter.announce_stage(Stage.TRANSCRIBING)
         reporter.announce_stage(Stage.WRITING_SUBTITLES)
-        try:
-            subtitle_file = write_subtitles(transcript, resolved_output_path)
-        except OSError as exc:
-            raise SubtitleWriteError(resolved_output_path, reason=str(exc)) from exc
+        empty_transcript = Transcript(source_video=video, language="", segments=[])
+        subtitle_file = write_subtitles(empty_transcript, resolved_output_path)
+        print(NO_SPEECH_DETECTED_MESSAGE, file=stream, flush=True)
+        reporter.announce_stage(Stage.DONE)
+        return subtitle_file
 
-        if not transcript.segments:
-            reporter.report_notice(
-                f"No speech detected in '{resolved_video_path}' -- wrote an "
-                f"empty subtitle file to '{subtitle_file.output_path}'."
-            )
+    reporter.announce_stage(Stage.EXTRACTING_AUDIO)
+    audio_track = extract_audio(video)
+    temp_audio_path = Path(audio_track.extracted_path)
 
-        return PipelineResult(
-            subtitle_file=subtitle_file, transcript=transcript, reporter=reporter
+    # Transcribing and writing are handled under one unified cleanup block:
+    # a failure from *either* stage (ModelLoadError/TranscriptionError, or a
+    # writer failure such as an unwritable directory/full disk) is already
+    # propagating and takes priority -- clean up the temporary WAV
+    # best-effort, but never let a cleanup failure replace or mask the
+    # primary exception with a raw OSError/traceback, and never leave the
+    # temp file behind regardless of which stage failed (P2 review).
+    try:
+        reporter.announce_stage(Stage.TRANSCRIBING)
+        transcript = transcribe_audio(
+            audio_track,
+            model_size=model_size,
+            on_segment=lambda segment: reporter.report_progress(segment.end_seconds),
         )
-    except BaseException as exc:
-        if isinstance(exc, WhisperFlowError):
-            reporter.report_failure(str(exc))
-        primary_error = exc
+        reporter.announce_stage(Stage.WRITING_SUBTITLES)
+        subtitle_file = write_subtitles(transcript, resolved_output_path)
+    except BaseException:
+        _cleanup_temp_audio(temp_audio_path)
         raise
-    finally:
-        # AudioTrack.extracted_path is always this pipeline's own private
-        # temp file (extract_audio() is never given an output_path here) --
-        # data-model.md: "Temporary WAV file, removed after the run".
-        # Cleaned up on every exit (success or failure) once it exists.
-        if audio_track is not None:
-            cleanup_error = _cleanup_temp_audio(audio_track.extracted_path)
-            if cleanup_error is not None and primary_error is None:
-                reporter.report_failure(str(cleanup_error))
-                raise cleanup_error
+
+    # Only attempted once the transcript is safely on disk: a temp-file
+    # cleanup failure at this point is this run's only failure, but it
+    # must not cost the user an otherwise-fully-produced, already-written
+    # .srt file -- write it, print the FR-008 notice if applicable, and
+    # only *then* surface the cleanup failure (P2 review).
+    cleanup_error = _cleanup_temp_audio(temp_audio_path)
+
+    if not transcript.segments:
+        print(NO_SPEECH_DETECTED_MESSAGE, file=stream, flush=True)
+
+    if cleanup_error is not None:
+        # Reported through the CLI's normal WhisperFlowError path
+        # (contracts/cli.md's Exit codes section), not silently swallowed
+        # -- but note Stage.DONE is deliberately never announced below in
+        # this case, since the run did not fully succeed.
+        raise cleanup_error
+
+    reporter.announce_stage(Stage.DONE)
+    return subtitle_file
 
 
 def _cleanup_temp_audio(path: Path) -> AudioExtractionError | None:
-    """Remove a pipeline-owned temporary audio file without leaking OSError."""
+    """Best-effort removal of the pipeline's own temporary WAV file.
+
+    data-model.md: the extracted WAV is a "Temporary WAV file, removed
+    after the run" -- `extract_audio()` always writes to a fresh
+    auto-generated temp path here (no `output_path` passed through), so
+    this pipeline owns cleaning it up, whether transcription succeeded or
+    raised.
+
+    A failure to remove it (e.g. a permission/lock error) must never leak
+    a raw `OSError`: doing so could otherwise replace an in-flight
+    `ModelLoadError`/`TranscriptionError` with an unrelated traceback, or
+    turn an otherwise-successful run into an unhandled crash instead of a
+    clean `WhisperFlowError` (P2 review). Returns the domain error to
+    raise instead of the cleanup `OSError`, or `None` on success, so the
+    caller can decide whether raising it would mask a more important
+    exception already propagating.
+    """
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
