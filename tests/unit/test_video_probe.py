@@ -233,6 +233,22 @@ class TestProbeVideoMocked:
         with pytest.raises(UnsupportedVideoFormatError):
             probe_video(video_path)
 
+    def test_unlaunchable_ffprobe_raises_unsupported_format(
+        self, monkeypatch, tmp_path: Path
+    ):
+        video_path = tmp_path / "clip.mp4"
+        video_path.touch()
+
+        def _raise_permission_error(*args, **kwargs):
+            raise PermissionError("[Errno 13] Permission denied: 'ffprobe'")
+
+        monkeypatch.setattr(subprocess, "run", _raise_permission_error)
+
+        with pytest.raises(UnsupportedVideoFormatError) as exc_info:
+            probe_video(video_path)
+
+        assert exc_info.value.path == video_path
+
     def test_missing_duration_raises_unsupported_format(self, monkeypatch, tmp_path: Path):
         video_path = tmp_path / "clip.mp4"
         video_path.touch()

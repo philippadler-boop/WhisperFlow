@@ -539,8 +539,10 @@ class TestExtractAudioMocked:
             ),
         )
 
-        with pytest.raises(AudioExtractionError):
+        with pytest.raises(AudioExtractionError) as exc_info:
             extract_audio(video)
+
+        assert "Output file does not contain any stream" in str(exc_info.value)
 
 
 class TestExtractAudioRealFfmpeg:
