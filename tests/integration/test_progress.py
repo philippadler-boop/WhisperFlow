@@ -25,8 +25,8 @@ def test_transcribe_reports_stage_and_progress_lines_on_stderr(
     cli_runner: CliRunner, clear_speech_video: Path, tmp_path: Path
 ) -> None:
     """`whisperflow transcribe <clear-speech video> --no-review` (Scenario 2)."""
-    if shutil.which("ffmpeg") is None:
-        pytest.skip("ffmpeg not installed")
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("ffmpeg/ffprobe not installed")
 
     video_path = tmp_path / "clear_speech.mp4"
     shutil.copyfile(clear_speech_video, video_path)
