@@ -46,7 +46,9 @@ def test_readme_documents_model_option_and_all_contract_sizes():
     assert "--model" in text
     for size in ("tiny", "base", "small", "medium", "large"):
         assert size in text
-    assert "default `base`" in text or "`base`" in text
+    assert (
+        "| `--model {tiny,base,small,medium,large}` | `base` |" in text
+    )
 
 
 def test_readme_documents_review_option_and_default():
@@ -76,8 +78,8 @@ def test_readme_documents_review_workflow_behavior():
 
 def test_readme_documents_exit_codes():
     text = _read_readme()
-    assert "`0`" in text
-    assert "`1`" in text
+    assert "| `0` | Success" in text
+    assert "| `1` | Fatal error" in text
 
 
 def test_readme_includes_a_review_mode_example_with_blocking_editor_flag():
