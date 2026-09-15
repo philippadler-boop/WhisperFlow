@@ -228,6 +228,30 @@ class SubtitleWriteError(WhisperFlowError):
         super().__init__(message)
 
 
+class DraftParseError(WhisperFlowError):
+    """The re-read `--review` draft `.srt` could not be parsed back in (T020).
+
+    Raised by `src/cli/review.py`'s `_reread_with_edits` when the file the
+    user was editing can no longer be parsed as valid `.srt` once they
+    finish -- e.g. the user leaves the file malformed (raises the `srt`
+    library's own `SRTParseError`/`TimestampParseError`), or adds a new
+    block whose end timestamp precedes its start (raises `SubtitleLine`'s
+    own `ValueError`, `src/subtitles/models.py`). Both are user-editing
+    mistakes, not bugs in this codebase, so -- matching the convention
+    every other subprocess/library boundary in this project follows (e.g.
+    `src/audio/video_probe.py`, `src/audio/extract.py`) -- they are caught
+    and re-raised as this single `WhisperFlowError` subclass rather than
+    left to escape as a raw traceback from the underlying library.
+    """
+
+    def __init__(self, path: str | Path, reason: str = "") -> None:
+        self.path = Path(path)
+        self.reason = reason.strip()
+        detail = f": {self.reason}" if self.reason else ""
+        message = f"failed to parse edited subtitle draft '{self.path}'{detail}"
+        super().__init__(message)
+
+
 class TranscriptionError(WhisperFlowError):
     """`faster-whisper` failed to transcribe an already-extracted audio track (T011).
 
