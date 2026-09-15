@@ -138,23 +138,52 @@ def review_subtitle_file(
     return _reread_with_edits(subtitle_file, draft_path)
 
 
+def _split_editor_command(editor: str) -> list[str]:
+    """Split `editor` into argv tokens, Windows-safe.
+
+    On every platform except Windows, plain `shlex.split(editor)` (POSIX
+    mode) is correct and quote-aware: it consumes the quote characters
+    used to mark a token's boundaries, so `'"code" --wait'` splits to
+    `["code", "--wait"]`.
+
+    POSIX mode is wrong on Windows, though: it treats a bare, unquoted
+    backslash as an escape character, which would silently corrupt an
+    ordinary Windows path like ``C:\\Editors\\Notepad2\\notepad2.exe``
+    (this project targets Windows -- see the ADRs and MSI packaging work)
+    into a bogus argv[0] with the backslashes dropped. `shlex.split(...,
+    posix=False)` avoids that by leaving backslashes alone -- but unlike
+    POSIX mode, non-POSIX mode does *not* consume the quote characters
+    that delimited a token; they stay embedded in the returned string
+    (e.g. `'"C:\\Program Files\\ed.exe"'` keeps its surrounding `"`
+    characters). Passed straight to `subprocess.run`, those quotes end up
+    as literal characters in argv, which is wrong for both a quoted path
+    containing a space and a quoted `-c` script value. So on Windows,
+    additionally strip one matching pair of leading/trailing quote
+    characters (`"` or `'`) from each token after splitting.
+    """
+    if sys.platform != "win32":
+        return shlex.split(editor)
+
+    tokens = shlex.split(editor, posix=False)
+    stripped = []
+    for token in tokens:
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+            token = token[1:-1]
+        stripped.append(token)
+    return stripped
+
+
 def _run_editor_subprocess(editor: str, path: Path) -> None:
     """Launch `editor` against `path` and block until it exits (default `run_editor`).
 
-    `editor` is split shell-style (`shlex.split`) so multi-word commands
-    from `--editor`/`$EDITOR` (e.g. `"code --wait"`, per contracts/cli.md's
-    Scenario 3) work the same as a bare editor name, and the draft path is
-    appended as the final argument.
-
-    `shlex.split` is run in non-POSIX mode on Windows (`posix=False`):
-    POSIX quoting treats a bare, unquoted backslash as an escape
-    character, which would silently corrupt an ordinary Windows path like
-    ``--editor C:\\Editors\\Notepad2\\notepad2.exe`` (this project targets
-    Windows -- see the ADRs and MSI packaging work) into a bogus argv[0]
-    with the backslashes dropped. Non-POSIX splitting leaves backslashes
-    alone.
+    `editor` is split shell-style (`_split_editor_command`) so multi-word
+    commands from `--editor`/`$EDITOR` (e.g. `"code --wait"`, per
+    contracts/cli.md's Scenario 3) work the same as a bare editor name --
+    including a Windows path containing spaces, when quoted (e.g.
+    `'"C:\\Program Files\\Notepad++\\notepad++.exe"'`) -- and the draft
+    path is appended as the final argument.
     """
-    command = [*shlex.split(editor, posix=(sys.platform != "win32")), str(path)]
+    command = [*_split_editor_command(editor), str(path)]
     try:
         result = subprocess.run(command, check=False)
     except OSError as exc:

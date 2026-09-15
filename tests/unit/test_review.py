@@ -18,6 +18,7 @@ from cli.review import (
     FALLBACK_PROMPT_TEMPLATE,
     EditorInvocationError,
     _run_editor_subprocess,
+    _split_editor_command,
     review_subtitle_file,
 )
 from lib.errors import DraftParseError, WhisperFlowError
@@ -260,6 +261,58 @@ class TestRunEditorSubprocessShlexSplitting:
         _run_editor_subprocess(editor, draft_path)
 
         assert seen_commands == [[editor, str(draft_path)]]
+
+    def test_windows_style_quoted_path_with_space_is_split_correctly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A quoted Windows editor path containing a space keeps its quotes stripped.
+
+        `shlex.split(..., posix=False)` (needed so backslashes survive,
+        per the sibling test above) does not consume the quote characters
+        it uses to find token boundaries the way POSIX mode does. Without
+        stripping them back off, a legitimately quoted path like
+        `'"C:\\Program Files\\Notepad++\\notepad++.exe" --multiInst'`
+        would reach `subprocess.run` with the quote characters still
+        embedded in argv[0], which is wrong on every platform.
+        """
+        seen_commands = []
+
+        class _FakeCompletedProcess:
+            returncode = 0
+
+        def fake_run(command, **kwargs):
+            seen_commands.append(command)
+            return _FakeCompletedProcess()
+
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr("cli.review.subprocess.run", fake_run)
+
+        editor = '"C:\\Program Files\\Notepad++\\notepad++.exe" --multiInst'
+        draft_path = tmp_path / "draft.srt"
+
+        _run_editor_subprocess(editor, draft_path)
+
+        assert seen_commands == [
+            [
+                "C:\\Program Files\\Notepad++\\notepad++.exe",
+                "--multiInst",
+                str(draft_path),
+            ]
+        ]
+
+    def test_split_editor_command_strips_matching_quotes_on_windows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        assert _split_editor_command('"code" --wait') == ["code", "--wait"]
+
+    def test_split_editor_command_uses_posix_rules_off_windows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        assert _split_editor_command('"code" --wait') == ["code", "--wait"]
 
 
 class TestReReadWithEditsDraftParseError:
