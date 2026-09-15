@@ -1,20 +1,26 @@
-"""WhisperFlow CLI entrypoint (T007, T014).
+"""WhisperFlow CLI entrypoint (T007, T014, T021).
 
 Implements the argument/option surface of the single user-facing command,
 ``whisperflow transcribe VIDEO_PATH [OPTIONS]``, exactly as documented in
 ``specs/001-video-subtitle-generator/contracts/cli.md`` (spec FR-005).
 
-``_run_pipeline`` wires the ``--no-review`` command path to T013's real
-orchestration (``cli.pipeline.run_pipeline``): probe -> extract ->
-transcribe -> write. ``--review`` (the default) is not implemented yet --
-that's T020/T021's job (the interactive review step and its branching) --
-so it still raises ``NotImplementedError`` for now. Every domain error
-T013's stages can raise (``lib.errors.WhisperFlowError`` and its
-subclasses -- unsupported video format, oversized video, missing
-``ffmpeg``/``ffprobe``, or a failed ASR model load/transcription) is
-caught exactly once here, at the top level, and reported as contracts/
-cli.md's Exit codes section requires: a single ``Error: ...`` line on
-stderr, exit code 1 (spec FR-007).
+``_run_pipeline`` wires both command paths to their real implementations:
+``--no-review`` dispatches straight to T013's orchestration
+(``cli.pipeline.run_pipeline``): probe -> extract -> transcribe -> write.
+``--review`` (the contract default) runs that same pipeline first -- its
+written ``.srt`` doubles as the draft -- and then hands the resulting
+``SubtitleFile`` to T020's interactive review step
+(``cli.review.review_subtitle_file``), which opens it in ``$EDITOR``/
+``--editor``, blocks for confirmation, and returns a `SubtitleFile` with
+any edited lines' text folded back in (FR-009, FR-010); this function
+then writes that finalized `SubtitleFile` back to ``output_path`` so the
+edits are reflected in the file left on disk. Every domain error either
+path can raise (``lib.errors.WhisperFlowError`` and its subclasses --
+unsupported video format, oversized video, missing ``ffmpeg``/``ffprobe``,
+a failed ASR model load/transcription, or a failed/aborted review edit)
+is caught exactly once here, at the top level, and reported as
+contracts/cli.md's Exit codes section requires: a single ``Error: ...``
+line on stderr, exit code 1 (spec FR-007).
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ from rich.text import Text
 from typer.core import TyperGroup
 
 from cli import pipeline
+from cli.review import review_subtitle_file
 from lib.errors import WhisperFlowError
 
 BANNER = """
@@ -99,8 +106,8 @@ def _default_editor() -> str | None:
     """Resolve the default editor per contracts/cli.md's ``--editor`` row.
 
     Falls back to ``$EDITOR``, then ``$VISUAL``; ``None`` if neither is
-    set, letting the (not-yet-implemented) review step fall back to its
-    own built-in prompt.
+    set, letting the review step (``cli.review.review_subtitle_file``)
+    fall back to its own built-in prompt.
     """
     return os.environ.get("EDITOR") or os.environ.get("VISUAL") or None
 
@@ -118,25 +125,30 @@ def _run_pipeline(
     review: bool,
     editor: str | None,
 ) -> None:
-    """Dispatch to T013's real pipeline for the ``--no-review`` path (T014).
+    """Dispatch to T013's pipeline, and T020's review step when requested (T021).
 
-    ``--review`` (``review=True``, the contract default) still has no
-    implementation to dispatch to -- T020 (the interactive review flow) and
-    T021 (wiring it in here) haven't landed yet -- so it keeps failing
-    loudly with ``NotImplementedError`` rather than silently skipping the
-    review step it was asked for. ``editor`` is accordingly unused until
-    then; it's already threaded through so T021 only has to change this
-    function's body, not its (or ``transcribe``'s) signature.
+    Always runs T013's full probe -> extract -> transcribe -> write
+    pipeline (``cli.pipeline.run_pipeline``) first: its written ``.srt`` is
+    the finished output for ``--no-review``, and doubles as the draft
+    ``--review`` opens for editing.
+
+    When ``review`` is true (the contract default), the freshly written
+    ``SubtitleFile`` is then handed to ``cli.review.review_subtitle_file``,
+    which opens it in ``editor`` (already resolved from ``--editor``/
+    ``$EDITOR``/``$VISUAL`` by ``transcribe``), blocks until the user
+    confirms they're done, and returns a new ``SubtitleFile`` with any
+    edited lines' text folded in (FR-009, FR-010). That finalized
+    ``SubtitleFile`` is then written back to ``output_path`` so the file
+    left on disk reflects the user's edits, not just the original draft.
     """
-    if review:
-        raise NotImplementedError(
-            "whisperflow transcribe --review: pipeline not yet implemented (see T020/T021)"
-        )
-    pipeline.run_pipeline(
+    subtitle_file = pipeline.run_pipeline(
         video_path=video_path,
         output_path=output_path,
         model_size=model.value,
     )
+    if review:
+        subtitle_file = review_subtitle_file(subtitle_file, editor=editor)
+        subtitle_file.write()
 
 
 @app.command()
