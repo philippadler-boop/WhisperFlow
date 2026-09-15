@@ -152,6 +152,99 @@ class TestReviewSubtitleFileEditedFlag:
 
         assert [line.text for line in result.lines] == ["Hello there."]
 
+    def test_multiple_edits_flag_only_the_changed_lines(self, tmp_path: Path) -> None:
+        """Editing a subset of lines leaves every other line's `edited` flag alone.
+
+        `test_edited_text_marks_only_that_line_as_edited` above only ever
+        changes one of two lines; this exercises the same rule -- "edited
+        flag set only on changed lines, unchanged lines untouched" (this
+        task's own title) -- with three lines and two separate edits, so a
+        bug that (for example) flips every line's `edited` flag once *any*
+        line changes, rather than tracking each line independently, would
+        be caught here even though it could slip past a two-line fixture.
+        """
+        subtitle_file = _subtitle_file(
+            tmp_path,
+            [
+                SubtitleLine(index=1, start_seconds=0.0, end_seconds=1.0, text="Line one."),
+                SubtitleLine(index=2, start_seconds=1.0, end_seconds=2.0, text="Line two."),
+                SubtitleLine(index=3, start_seconds=2.0, end_seconds=3.0, text="Line three."),
+            ],
+        )
+
+        def fake_run_editor(editor: str, path: Path) -> None:
+            content = path.read_text(encoding="utf-8")
+            content = content.replace("Line one.", "Edited one.")
+            content = content.replace("Line three.", "Edited three.")
+            path.write_text(content, encoding="utf-8")
+
+        result = review_subtitle_file(subtitle_file, editor="fake", run_editor=fake_run_editor)
+
+        assert [line.text for line in result.lines] == [
+            "Edited one.",
+            "Line two.",
+            "Edited three.",
+        ]
+        assert result.lines[0].edited is True
+        assert result.lines[1].edited is False
+        assert result.lines[2].edited is True
+
+    def test_edits_are_matched_by_index_not_by_position(self, tmp_path: Path) -> None:
+        """A reordered draft still attributes edits to the correct line by index.
+
+        `_reread_with_edits` matches re-read blocks back to the original
+        lines by `SubtitleLine.index`, not by their position in the file
+        (see its docstring in `src/cli/review.py`) -- so swapping the order
+        of two untouched blocks in the draft must not misattribute either
+        one as edited, and an edit made to a block that moved must still
+        land on the right line.
+        """
+        subtitle_file = _two_line_subtitle_file(tmp_path)
+
+        def fake_run_editor(editor: str, path: Path) -> None:
+            # Swap the two blocks' order and edit what was originally
+            # index 2's text, while leaving index 1's text untouched.
+            path.write_text(
+                "2\n00:00:01,000 --> 00:00:02,000\nHow's it going?\n\n"
+                "1\n00:00:00,000 --> 00:00:01,000\nHello there.\n\n",
+                encoding="utf-8",
+            )
+
+        result = review_subtitle_file(subtitle_file, editor="fake", run_editor=fake_run_editor)
+
+        by_index = {line.index: line for line in result.lines}
+        assert by_index[1].text == "Hello there."
+        assert by_index[1].edited is False
+        assert by_index[2].text == "How's it going?"
+        assert by_index[2].edited is True
+
+    def test_reediting_an_already_edited_line_to_new_text_updates_text_and_stays_edited(
+        self, tmp_path: Path
+    ) -> None:
+        subtitle_file = _subtitle_file(
+            tmp_path,
+            [
+                SubtitleLine(
+                    index=1,
+                    start_seconds=0.0,
+                    end_seconds=1.0,
+                    text="First correction.",
+                    edited=True,
+                )
+            ],
+        )
+
+        def fake_run_editor(editor: str, path: Path) -> None:
+            content = path.read_text(encoding="utf-8")
+            path.write_text(
+                content.replace("First correction.", "Second correction."), encoding="utf-8"
+            )
+
+        result = review_subtitle_file(subtitle_file, editor="fake", run_editor=fake_run_editor)
+
+        assert result.lines[0].text == "Second correction."
+        assert result.lines[0].edited is True
+
     def test_returned_subtitle_file_preserves_metadata(self, tmp_path: Path) -> None:
         subtitle_file = _two_line_subtitle_file(tmp_path)
 

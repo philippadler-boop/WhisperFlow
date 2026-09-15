@@ -80,7 +80,7 @@ description: "Task list template for feature implementation"
 - [x] T020 [US2] Implement the `--review` flow — write the draft `.srt`, invoke `$EDITOR`/`--editor`, wait for confirmation, re-read the file and mark changed lines' `edited` flag — in `src/cli/review.py` (depends on T005, T007) (data-model.md — SubtitleLine.edited; spec FR-009, FR-010)
 - [x] T021 [US2] Wire `--review`/`--no-review` branching into the CLI command, defaulting to `--review` per contracts/cli.md, in `src/cli/main.py` (depends on T014, T020) (spec FR-005)
 - [x] T022 [P] [US2] Integration test: `--review` with a simulated editor that changes one line → finalized `.srt` reflects the edit (quickstart.md Scenario 3) in `tests/integration/test_review.py`
-- [ ] T023 [P] [US2] Unit tests for the review/edit logic (`edited` flag set only on changed lines, unchanged lines untouched) in `tests/unit/test_review.py`
+- [x] T023 [P] [US2] Unit tests for the review/edit logic (`edited` flag set only on changed lines, unchanged lines untouched) in `tests/unit/test_review.py`
 
 **Checkpoint**: User Stories 1 and 2 both work independently
 
