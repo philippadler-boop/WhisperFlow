@@ -84,9 +84,27 @@ Available models are `tiny`, `base`, `small`, `medium`, and `large`.
 
 ### Review mode
 
-The command currently defaults to review mode. The completed non-interactive
-User Story 1 path uses `--no-review` as shown above. The review/edit workflow
-is a separate task and is not yet available in this release.
+`--review` is the default (omit `--no-review` to use it). After the draft
+`.srt` is generated, WhisperFlow opens it in an editor and waits for you to
+confirm you're done before writing the finalized file:
+
+```powershell
+whisperflow transcribe .\samples\hello.mp4 --editor "code --wait"
+```
+
+- The editor command comes from `--editor`, falling back to the `$EDITOR`
+	or `$VISUAL` environment variable. Use an editor flag that blocks until
+	the file is closed (e.g. `code --wait`, `notepad`, `vim`) — WhisperFlow
+	waits for that process to exit before re-reading the file.
+- If no editor is configured anywhere, WhisperFlow instead prints the draft
+	file's path and waits for you to press Enter after editing and saving it
+	yourself.
+- Only lines whose text actually changed are treated as edited; timings are
+	not user-editable in this release. The finalized `.srt` written to
+	`--output` reflects your edits, not the originally generated text.
+
+For a script-friendly run that skips review entirely, pass `--no-review` as
+shown above.
 
 ### Progress and output
 
@@ -106,6 +124,8 @@ error line to stderr. Common causes include:
 - A video longer than the two-hour maximum
 - Missing `ffmpeg` or `ffprobe`
 - A transcription model that cannot be loaded
+- In `--review` mode, a configured editor that fails to start or exits
+	non-zero, or a saved draft that can no longer be parsed as valid `.srt`
 
 No partial subtitle file is left behind for input validation failures.
 
@@ -115,13 +135,45 @@ No partial subtitle file is left behind for input validation failures.
 whisperflow transcribe VIDEO_PATH [OPTIONS]
 ```
 
+Full contract: `specs/001-video-subtitle-generator/contracts/cli.md`.
+
+Arguments:
+
+| Argument | Required | Description |
+|---|---|---|
+| `VIDEO_PATH` | Yes | Path to the input video file |
+
 Options:
 
-- `--output`, `-o`: output `.srt` path; defaults beside the input video
-- `--model`: `tiny`, `base`, `small`, `medium`, or `large`; default `base`
-- `--review` / `--no-review`: review is the default; `--no-review` finalizes
-	immediately
-- `--editor CMD`: editor command for the review workflow
+| Option | Default | Description |
+|---|---|---|
+| `--output`, `-o PATH` | `<video_basename>.srt` next to the input video | Where to write the `.srt` file |
+| `--model {tiny,base,small,medium,large}` | `base` | faster-whisper model size — smaller is faster, larger is more accurate |
+| `--review` / `--no-review` | `--review` | With `--review`, opens the draft `.srt` in an editor and waits for confirmation before finalizing; `--no-review` finalizes immediately |
+| `--editor CMD` | `$EDITOR`/`$VISUAL`, else a built-in fallback prompt | Overrides which editor `--review` opens |
+
+Examples:
+
+```powershell
+# Script-friendly, no editor pause
+whisperflow transcribe .\samples\hello.mp4 --no-review
+
+# Custom output path
+whisperflow transcribe .\samples\hello.mp4 -o .\output\hello.srt --no-review
+
+# Smaller/faster model
+whisperflow transcribe .\samples\hello.mp4 --model tiny --no-review
+
+# Review with an explicit, blocking editor
+whisperflow transcribe .\samples\hello.mp4 --editor "code --wait"
+```
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success — `.srt` file written (including the zero-subtitle-blocks case when no speech is detected) |
+| `1` | Fatal error — see [Errors](#errors) above |
 
 For live option descriptions and the startup banner:
 

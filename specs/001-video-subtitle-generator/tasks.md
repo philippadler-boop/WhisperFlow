@@ -90,7 +90,7 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Improvements that span both user stories
 
-- [ ] T024 [P] Document the `transcribe` command's usage (arguments, options, examples from contracts/cli.md) in `README.md`
+- [x] T024 [P] Document the `transcribe` command's usage (arguments, options, examples from contracts/cli.md) in `README.md`
 - [ ] T025 [P] Add a benchmark helper (`scripts/benchmark.py`) that times a `transcribe` run against a given video and prints elapsed time (SC-002/SC-006, quickstart.md Scenario 8), and, given a small labeled reference corpus (sample videos + their known-correct transcript text), reports rough transcript-accuracy and subtitle-timing-sync percentages against that corpus. Note: SC-003 ("judged by a reviewing user") and SC-004 ("perceived by a viewer") are spec.md's own human-judgment criteria, not automatable pass/fail checks — this script gives `qa` a concrete number to anchor that judgment against, it does not replace it (Principle V, validation reports are `qa`-owned).
 - [ ] T026 [P] Integration test confirming no outbound network calls occur during `transcribe` (quickstart.md Scenario 7) in `tests/integration/test_no_network.py`
 - [ ] T027 [P] Lint/type-check cleanup pass across `src/` and `tests/` (`ruff check --fix`)
