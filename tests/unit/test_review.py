@@ -9,6 +9,7 @@ editor binary or real stdin by injecting `run_editor`/`confirm`.
 from __future__ import annotations
 
 import io
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,8 +17,10 @@ import pytest
 from cli.review import (
     FALLBACK_PROMPT_TEMPLATE,
     EditorInvocationError,
+    _run_editor_subprocess,
     review_subtitle_file,
 )
+from lib.errors import DraftParseError, WhisperFlowError
 from subtitles.models import SubtitleFile, SubtitleLine
 
 
@@ -205,9 +208,15 @@ class TestReviewSubtitleFileFallbackPrompt:
 class TestReviewSubtitleFileEditorInvocationError:
     def test_editor_nonzero_exit_raises_editor_invocation_error(self, tmp_path: Path) -> None:
         subtitle_file = _two_line_subtitle_file(tmp_path)
+        # A portable non-zero-exit "editor": a real Python interpreter
+        # invoked with a multi-word --editor value, rather than relying on
+        # a `false` binary being on PATH (not guaranteed, e.g. on Windows).
+        # This also exercises shlex.split's multi-word-command path end to
+        # end, since `editor` here is more than one token.
+        editor = f"{sys.executable} -c \"import sys; sys.exit(1)\""
 
-        with pytest.raises(EditorInvocationError, match="false"):
-            review_subtitle_file(subtitle_file, editor="false")
+        with pytest.raises(EditorInvocationError, match="exited with status 1"):
+            review_subtitle_file(subtitle_file, editor=editor)
 
     def test_editor_not_found_raises_editor_invocation_error(self, tmp_path: Path) -> None:
         subtitle_file = _two_line_subtitle_file(tmp_path)
@@ -216,6 +225,73 @@ class TestReviewSubtitleFileEditorInvocationError:
             review_subtitle_file(subtitle_file, editor="not-a-real-editor-binary")
 
     def test_editor_invocation_error_is_a_whisperflow_error(self) -> None:
-        from lib.errors import WhisperFlowError
-
         assert issubclass(EditorInvocationError, WhisperFlowError)
+
+
+class TestRunEditorSubprocessShlexSplitting:
+    def test_windows_style_backslash_path_is_not_mangled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Windows editor path's backslashes must survive splitting.
+
+        `shlex.split` in its default POSIX mode treats a bare, unquoted
+        backslash as an escape character, which would corrupt an editor
+        value like ``C:\\Editors\\Notepad2\\notepad2.exe`` (no spaces
+        requiring quoting, the common case for a bare `--editor`/`$EDITOR`
+        path) into a bogus argv[0] with the backslashes silently dropped.
+        `_run_editor_subprocess` must split in non-POSIX mode on Windows so
+        the path reaches `subprocess.run` unchanged.
+        """
+        seen_commands = []
+
+        class _FakeCompletedProcess:
+            returncode = 0
+
+        def fake_run(command, **kwargs):
+            seen_commands.append(command)
+            return _FakeCompletedProcess()
+
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr("cli.review.subprocess.run", fake_run)
+
+        editor = r"C:\Editors\Notepad2\notepad2.exe"
+        draft_path = tmp_path / "draft.srt"
+
+        _run_editor_subprocess(editor, draft_path)
+
+        assert seen_commands == [[editor, str(draft_path)]]
+
+
+class TestReReadWithEditsDraftParseError:
+    def test_malformed_draft_raises_draft_parse_error(self, tmp_path: Path) -> None:
+        subtitle_file = _two_line_subtitle_file(tmp_path)
+
+        def fake_run_editor(editor: str, path: Path) -> None:
+            path.write_text("this is not valid .srt content at all", encoding="utf-8")
+
+        with pytest.raises(DraftParseError):
+            review_subtitle_file(subtitle_file, editor="fake", run_editor=fake_run_editor)
+
+    def test_invalid_timestamp_raises_draft_parse_error(self, tmp_path: Path) -> None:
+        subtitle_file = _two_line_subtitle_file(tmp_path)
+
+        def fake_run_editor(editor: str, path: Path) -> None:
+            # A newly *added* block (index 3, no original counterpart) with
+            # its end timestamp before its start -- SubtitleLine.__post_init__
+            # raises ValueError for this when constructing the new line,
+            # which must be wrapped rather than escaping raw from
+            # review_subtitle_file. (An invalid timestamp on an *existing*
+            # index wouldn't reach validation at all: with_text() only ever
+            # replaces text, never start/end.)
+            path.write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\nHello there.\n\n"
+                "2\n00:00:01,000 --> 00:00:02,000\nHow are you?\n\n"
+                "3\n00:00:05,000 --> 00:00:01,000\nBad timing\n\n",
+                encoding="utf-8",
+            )
+
+        with pytest.raises(DraftParseError):
+            review_subtitle_file(subtitle_file, editor="fake", run_editor=fake_run_editor)
+
+    def test_draft_parse_error_is_a_whisperflow_error(self) -> None:
+        assert issubclass(DraftParseError, WhisperFlowError)
