@@ -80,7 +80,12 @@ def test_review_with_simulated_editor_reflects_edit_in_finalized_srt(
 
     editor_script = tmp_path / "simulated_editor.py"
     _write_simulated_editor_script(editor_script)
-    editor_command = f"{sys.executable} {editor_script}"
+    # Quote each token: on Windows (and potentially in other environments)
+    # `sys.executable`/`tmp_path` may contain spaces, which a bare
+    # space-joined command would mis-tokenize. Quoting here also exercises
+    # the quoted-path/quote-stripping branch in `_split_editor_command`
+    # that production `--editor` values with spaces rely on.
+    editor_command = f'"{sys.executable}" "{editor_script}"'
 
     result = cli_runner.invoke(
         app,
