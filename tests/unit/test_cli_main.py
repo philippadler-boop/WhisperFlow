@@ -340,6 +340,48 @@ class TestErrorReporting:
             f"Error: failed to write subtitle file to '{tmp_path / 'out.srt'}': Permission denied"
         ]
 
+    def test_review_write_back_failure_is_reported_once(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A failed write-back of the reviewed/finalized `SubtitleFile`
+        (T021's `subtitle_file.write()` call after `review_subtitle_file`
+        returns) must be reported the same way T013's own initial write
+        failure is (`SubtitleWriteError` -> single `Error: ...` line, exit
+        code 1) rather than propagating as a raw, unhandled `OSError`."""
+        output_path = tmp_path / "out.srt"
+        draft = SubtitleFile(
+            lines=[SubtitleLine(index=1, start_seconds=0.0, end_seconds=1.0, text="Hi")],
+            output_path=output_path,
+        )
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", lambda **kwargs: draft)
+
+        edited = SubtitleFile(
+            lines=[
+                SubtitleLine(
+                    index=1, start_seconds=0.0, end_seconds=1.0, text="Edited!", edited=True
+                )
+            ],
+            output_path=output_path,
+        )
+        monkeypatch.setattr(
+            main_module, "review_subtitle_file", lambda subtitle_file, **kwargs: edited
+        )
+
+        def _raise_oserror(self) -> None:
+            raise OSError("Permission denied")
+
+        monkeypatch.setattr(SubtitleFile, "write", _raise_oserror)
+
+        result = cli_runner.invoke(
+            app, ["transcribe", "video.mp4", "--review", "--output", str(output_path)]
+        )
+
+        assert result.exit_code == 1
+        error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
+        assert error_lines == [
+            f"Error: failed to write subtitle file to '{output_path}': Permission denied"
+        ]
+
     def test_review_step_error_reported_clearly(
         self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

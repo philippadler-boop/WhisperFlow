@@ -37,7 +37,7 @@ from typer.core import TyperGroup
 
 from cli import pipeline
 from cli.review import review_subtitle_file
-from lib.errors import WhisperFlowError
+from lib.errors import SubtitleWriteError, WhisperFlowError
 
 BANNER = """
 ██╗    ██╗██╗  ██╗██╗███████╗██████╗ ███████╗██████╗ ███████╗██╗      ██████╗ ██╗    ██╗
@@ -140,6 +140,12 @@ def _run_pipeline(
     edited lines' text folded in (FR-009, FR-010). That finalized
     ``SubtitleFile`` is then written back to ``output_path`` so the file
     left on disk reflects the user's edits, not just the original draft.
+    A failure writing that finalized file back (e.g. output directory
+    permissions changed, disk full, mid-review) is reported the same way
+    ``write_subtitles()`` reports T013's own initial write failure: wrapped
+    as a ``SubtitleWriteError`` rather than left as a raw ``OSError``, so
+    it's caught by ``transcribe``'s top-level ``WhisperFlowError`` handler
+    instead of surfacing as an unhandled traceback.
     """
     subtitle_file = pipeline.run_pipeline(
         video_path=video_path,
@@ -148,7 +154,10 @@ def _run_pipeline(
     )
     if review:
         subtitle_file = review_subtitle_file(subtitle_file, editor=editor)
-        subtitle_file.write()
+        try:
+            subtitle_file.write()
+        except OSError as exc:
+            raise SubtitleWriteError(output_path, reason=str(exc)) from exc
 
 
 @app.command()
