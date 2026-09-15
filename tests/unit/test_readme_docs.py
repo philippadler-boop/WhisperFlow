@@ -41,6 +41,17 @@ def test_readme_documents_output_option():
     assert "<video_basename>.srt" in text
 
 
+def test_readme_does_not_claim_output_directory_must_preexist():
+    """Regression guard for the QA-caught inaccuracy on PR #125:
+    `SubtitleFile.write()` (`src/subtitles/models.py`) calls
+    `target.parent.mkdir(parents=True, exist_ok=True)` before writing, so
+    the destination directory is created automatically -- it is not
+    required to already exist. The README must not claim otherwise."""
+    text = _read_readme()
+    assert "directory must already exist" not in text
+    assert "created automatically" in text
+
+
 def test_readme_documents_model_option_and_all_contract_sizes():
     text = _read_readme()
     assert "--model" in text

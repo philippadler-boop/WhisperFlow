@@ -62,8 +62,8 @@ The default output is next to the input video. For `hello.mp4`, the result is
 
 ### Choose an output path
 
-Use `--output` or `-o` to select the subtitle destination. The destination
-directory must already exist:
+Use `--output` or `-o` to select the subtitle destination. Parent
+directories are created automatically if they don't already exist:
 
 ```powershell
 whisperflow transcribe .\samples\hello.mp4 `
