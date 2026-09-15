@@ -1,15 +1,16 @@
-"""Unit tests for the `whisperflow transcribe` CLI (T007, T014).
+"""Unit tests for the `whisperflow transcribe` CLI (T007, T014, T021).
 
 Exercises argument/option parsing and defaulting (T007), per
 contracts/cli.md. A full contract test (asserting the entire `--help`
 surface matches contracts/cli.md verbatim) is T008's responsibility.
 
-T014's own behavior -- dispatching the `--no-review` path to T013's real
-`cli.pipeline.run_pipeline`, `--review` still raising `NotImplementedError`
-(T020/T021 aren't done yet), and reporting any `lib.errors.WhisperFlowError`
-raised by the pipeline as a single `Error: ...` stderr line with exit code
-1 (spec FR-007) -- is covered by the `TestRunPipelineDispatch` and
-`TestErrorReporting` classes below.
+T014/T021's own behavior -- dispatching `--no-review` straight to T013's
+real `cli.pipeline.run_pipeline`, dispatching `--review` (the default) to
+that same pipeline *and then* T020's `cli.review.review_subtitle_file`
+review step, writing back its finalized result, and reporting any
+`lib.errors.WhisperFlowError` raised by either step as a single
+`Error: ...` stderr line with exit code 1 (spec FR-007) -- is covered by
+the `TestRunPipelineDispatch` and `TestErrorReporting` classes below.
 """
 
 from __future__ import annotations
@@ -24,12 +25,14 @@ from typer.testing import CliRunner
 
 import cli.main as main_module
 from cli.main import BANNER, ModelSize, _default_editor, _default_output_path, app
+from cli.review import EditorInvocationError
 from lib.errors import (
     FfmpegNotFoundError,
     MaxDurationExceededError,
     SubtitleWriteError,
     UnsupportedVideoFormatError,
 )
+from subtitles.models import SubtitleFile, SubtitleLine
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -159,15 +162,10 @@ def test_editor_option_overrides_env(
     assert captured_pipeline_call["editor"] == "code --wait"
 
 
-def test_transcribe_review_still_not_implemented(cli_runner: CliRunner) -> None:
-    """`--review` (the default) has no implementation yet (T020/T021)."""
-    result = cli_runner.invoke(app, ["transcribe", "video.mp4"])
-    assert result.exit_code == 1
-    assert isinstance(result.exception, NotImplementedError)
-
-
 class TestRunPipelineDispatch:
-    """T014: `--no-review` dispatches to `cli.pipeline.run_pipeline`."""
+    """T014/T021: `--no-review`/`--review` dispatch to `cli.pipeline.run_pipeline`,
+    and `--review` additionally to `cli.review.review_subtitle_file`.
+    """
 
     def test_no_review_calls_pipeline_run_pipeline(
         self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -189,26 +187,89 @@ class TestRunPipelineDispatch:
         assert captured["output_path"] == Path("out.srt")
         assert captured["model_size"] == "small"
 
-    def test_review_flag_does_not_reach_pipeline(
-        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    def test_no_review_does_not_invoke_review_step(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        subtitle_file = SubtitleFile(
+            lines=[SubtitleLine(index=1, start_seconds=0.0, end_seconds=1.0, text="Hi")],
+            output_path=tmp_path / "out.srt",
+        )
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", lambda **kwargs: subtitle_file)
         called = False
 
-        def _fake_run_pipeline(**kwargs):
+        def _fake_review(*args, **kwargs):
             nonlocal called
             called = True
+            return subtitle_file
 
-        monkeypatch.setattr(main_module.pipeline, "run_pipeline", _fake_run_pipeline)
+        monkeypatch.setattr(main_module, "review_subtitle_file", _fake_review)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--no-review"])
+
+        assert result.exit_code == 0, result.output
+        assert called is False
+
+    def test_review_calls_pipeline_then_review_step(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        draft = SubtitleFile(
+            lines=[SubtitleLine(index=1, start_seconds=0.0, end_seconds=1.0, text="Hi")],
+            output_path=tmp_path / "out.srt",
+        )
+        pipeline_captured: dict[str, Any] = {}
+        monkeypatch.setattr(
+            main_module.pipeline,
+            "run_pipeline",
+            lambda **kwargs: (pipeline_captured.update(kwargs), draft)[1],
+        )
+
+        review_captured: dict[str, Any] = {}
+
+        def _fake_review(subtitle_file, *, editor, **kwargs):
+            review_captured["subtitle_file"] = subtitle_file
+            review_captured["editor"] = editor
+            return subtitle_file
+
+        monkeypatch.setattr(main_module, "review_subtitle_file", _fake_review)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--review", "--editor", "true"])
+
+        assert result.exit_code == 0, result.output
+        assert pipeline_captured["video_path"] == Path("video.mp4")
+        assert review_captured["subtitle_file"] is draft
+        assert review_captured["editor"] == "true"
+
+    def test_review_writes_back_finalized_subtitle_file(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        output_path = tmp_path / "out.srt"
+        draft = SubtitleFile(
+            lines=[SubtitleLine(index=1, start_seconds=0.0, end_seconds=1.0, text="Hi")],
+            output_path=output_path,
+        )
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", lambda **kwargs: draft)
+
+        edited = SubtitleFile(
+            lines=[
+                SubtitleLine(
+                    index=1, start_seconds=0.0, end_seconds=1.0, text="Edited!", edited=True
+                )
+            ],
+            output_path=output_path,
+        )
+        monkeypatch.setattr(
+            main_module, "review_subtitle_file", lambda subtitle_file, **kwargs: edited
+        )
 
         result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--review"])
 
-        assert result.exit_code == 1
-        assert isinstance(result.exception, NotImplementedError)
-        assert called is False
+        assert result.exit_code == 0, result.output
+        assert "Edited!" in output_path.read_text(encoding="utf-8")
 
 
 class TestErrorReporting:
-    """T014: pipeline `WhisperFlowError`s become a single stderr line, exit 1."""
+    """T014/T021: pipeline/review `WhisperFlowError`s become a single
+    stderr line, exit 1."""
 
     def test_unsupported_format_reported_clearly(
         self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch
@@ -277,6 +338,73 @@ class TestErrorReporting:
         error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
         assert error_lines == [
             f"Error: failed to write subtitle file to '{tmp_path / 'out.srt'}': Permission denied"
+        ]
+
+    def test_review_write_back_failure_is_reported_once(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A failed write-back of the reviewed/finalized `SubtitleFile`
+        (T021's `subtitle_file.write()` call after `review_subtitle_file`
+        returns) must be reported the same way T013's own initial write
+        failure is (`SubtitleWriteError` -> single `Error: ...` line, exit
+        code 1) rather than propagating as a raw, unhandled `OSError`."""
+        output_path = tmp_path / "out.srt"
+        draft = SubtitleFile(
+            lines=[SubtitleLine(index=1, start_seconds=0.0, end_seconds=1.0, text="Hi")],
+            output_path=output_path,
+        )
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", lambda **kwargs: draft)
+
+        edited = SubtitleFile(
+            lines=[
+                SubtitleLine(
+                    index=1, start_seconds=0.0, end_seconds=1.0, text="Edited!", edited=True
+                )
+            ],
+            output_path=output_path,
+        )
+        monkeypatch.setattr(
+            main_module, "review_subtitle_file", lambda subtitle_file, **kwargs: edited
+        )
+
+        def _raise_oserror(self) -> None:
+            raise OSError("Permission denied")
+
+        monkeypatch.setattr(SubtitleFile, "write", _raise_oserror)
+
+        result = cli_runner.invoke(
+            app, ["transcribe", "video.mp4", "--review", "--output", str(output_path)]
+        )
+
+        assert result.exit_code == 1
+        error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
+        assert error_lines == [
+            f"Error: failed to write subtitle file to '{output_path}': Permission denied"
+        ]
+
+    def test_review_step_error_reported_clearly(
+        self, cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A `--review`-step failure (e.g. the configured editor couldn't be
+        launched) is reported through the same single-line, exit-code-1
+        path as any pipeline-stage `WhisperFlowError` (T021)."""
+        draft = SubtitleFile(
+            lines=[SubtitleLine(index=1, start_seconds=0.0, end_seconds=1.0, text="Hi")],
+            output_path=tmp_path / "out.srt",
+        )
+        monkeypatch.setattr(main_module.pipeline, "run_pipeline", lambda **kwargs: draft)
+
+        def _raise_editor_error(subtitle_file, **kwargs):
+            raise EditorInvocationError("bogus-editor", reason="No such file or directory")
+
+        monkeypatch.setattr(main_module, "review_subtitle_file", _raise_editor_error)
+
+        result = cli_runner.invoke(app, ["transcribe", "video.mp4", "--review"])
+
+        assert result.exit_code == 1
+        error_lines = [line for line in result.output.splitlines() if line.startswith("Error:")]
+        assert error_lines == [
+            "Error: failed to open editor 'bogus-editor': No such file or directory"
         ]
 
     def test_ffprobe_launch_failure_reported_clearly_not_as_raw_error(
