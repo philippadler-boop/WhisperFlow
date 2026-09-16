@@ -190,6 +190,28 @@ python -m pytest
 python -m ruff check .
 ```
 
+### Benchmarking
+
+`scripts/benchmark.py` times a `transcribe` run and, given a small labeled
+reference corpus, reports rough transcript-accuracy and subtitle-timing-sync
+percentages against it:
+
+```powershell
+# Time a single run (SC-002/SC-006, quickstart.md Scenario 8)
+python scripts/benchmark.py time samples/ten-minutes.mp4 --model tiny
+
+# Score accuracy/timing-sync against a labeled reference corpus
+python scripts/benchmark.py corpus tests/fixtures/benchmark_corpus.json
+```
+
+A corpus manifest is a JSON list of `{"video": ..., "reference_text": ...}`
+entries (or `"reference_text_path"` pointing at a plain-text file), each
+giving a sample video's known-correct transcript. The reported accuracy and
+timing-sync percentages are rough, automated proxies for SC-003 and SC-004 --
+both of those criteria are explicitly judged by a human (a reviewing user,
+a viewer) in spec.md, so this script gives `qa` a concrete number to anchor
+that judgment against, not a replacement for it.
+
 ## Windows Installer Build
 
 The Windows release is built as a PyInstaller one-directory application and
