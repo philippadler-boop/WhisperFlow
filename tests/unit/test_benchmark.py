@@ -427,11 +427,11 @@ class TestRunCorpusBenchmark:
         # Both lines were well-timed -> full sync ratio pooled across the corpus.
         assert result.overall_sync_ratio == 1.0
 
-    def test_empty_corpus_reports_nan_accuracy_and_full_sync(self):
+    def test_empty_corpus_reports_nan_accuracy_and_nan_sync(self):
         result = benchmark.run_corpus_benchmark([])
         assert result.entries == []
         assert result.overall_accuracy != result.overall_accuracy  # nan
-        assert result.overall_sync_ratio == 1.0
+        assert result.overall_sync_ratio != result.overall_sync_ratio  # nan
 
     def test_writes_each_entry_to_its_own_temp_output_path(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -550,8 +550,13 @@ class TestMainCli:
         assert "Error:" in err
 
     def test_no_subcommand_exits_nonzero_via_argparse(self):
-        with pytest.raises(SystemExit):
+        # argparse's own usage-error status, 2 -- distinct from --strict's
+        # threshold-miss status, 3 (see
+        # test_corpus_strict_returns_nonzero_when_accuracy_target_is_missed),
+        # so a CI script can tell the two failure modes apart.
+        with pytest.raises(SystemExit) as exc_info:
             benchmark.main([])
+        assert exc_info.value.code == 2
 
     def test_corpus_strict_returns_zero_when_targets_are_met(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
@@ -594,7 +599,9 @@ class TestMainCli:
 
         exit_code = benchmark.main(["corpus", str(manifest), "--strict"])
 
-        assert exit_code == 2
+        # Distinct from argparse's own status 2 for usage errors (see
+        # test_no_subcommand_exits_nonzero_via_argparse).
+        assert exit_code == 3
         out = capsys.readouterr().out
         assert "MISSES target" in out
 
@@ -683,5 +690,32 @@ class TestPrintCorpusReport:
 
         result = benchmark.CorpusBenchmarkResult(entries=[])
         out = io.StringIO()
-        # overall_accuracy is nan for an empty corpus -- never counted as "met".
+        # overall_accuracy/overall_sync_ratio are both nan for an empty
+        # corpus -- never counted as "met".
         assert benchmark._print_corpus_report(result, out) is False
+
+    def test_zero_total_lines_prints_sc004_as_not_evaluated_not_a_false_pass(self):
+        """A corpus where every entry produced zero subtitle lines (e.g. all
+        silence, or a transcription bug) is not the same as an empty
+        manifest, but `overall_sync_ratio` is `nan` in both cases -- assert
+        the actual printed SC-004 text, not just the aggregate boolean,
+        since a vacuous `1.0` there would silently print a false "meets
+        target" verdict even though the aggregate `False` (from the
+        accuracy side) would mask it."""
+        import io
+
+        result = benchmark.CorpusBenchmarkResult(
+            entries=[
+                benchmark.CorpusEntryResult(
+                    label="silent", accuracy=0.0, sync_ratio=0.0, line_count=0, in_sync_count=0
+                )
+            ]
+        )
+        out = io.StringIO()
+
+        targets_met = benchmark._print_corpus_report(result, out)
+
+        assert targets_met is False
+        printed = out.getvalue()
+        assert "SC-004 target: could not be evaluated (empty corpus)." in printed
+        assert "meets target" not in printed

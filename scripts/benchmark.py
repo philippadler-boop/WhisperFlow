@@ -533,10 +533,20 @@ class CorpusBenchmarkResult:
         """In-sync lines pooled across every entry, divided by the total
         line count across the whole corpus -- weighted by how many
         subtitle lines each video actually produced, rather than by video
-        count."""
+        count.
+
+        `nan` when the corpus produced zero subtitle lines in total,
+        mirroring `overall_accuracy`'s `nan` for the analogous no-data case
+        -- this isn't only reached by an empty manifest, but by any corpus
+        where every entry happened to produce zero lines (e.g. all-silence
+        videos, or a transcription bug producing empty output), and there
+        is no line data at all to judge sync on in that case. Returning a
+        vacuous `1.0` there would make `sc004_note()` print a false "meets
+        target" verdict for a genuinely unevaluable corpus.
+        """
         total_lines = sum(entry.line_count for entry in self.entries)
         if total_lines == 0:
-            return 1.0
+            return float("nan")
         total_in_sync = sum(entry.in_sync_count for entry in self.entries)
         return total_in_sync / total_lines
 
@@ -655,9 +665,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     corpus_parser.add_argument(
         "--strict", action="store_true",
         help=(
-            "Exit with a nonzero status if the corpus's overall accuracy/"
-            "timing-sync fall short of --min-accuracy/--min-sync-ratio, "
-            "instead of just reporting the numbers."
+            "Exit with status 3 if the corpus's overall accuracy/timing-sync "
+            "fall short of --min-accuracy/--min-sync-ratio, instead of just "
+            "reporting the numbers. Status 3 is distinct from argparse's own "
+            "status 2 for usage errors (e.g. a missing argument or an invalid "
+            "--model choice), so a CI script branching on exit code can tell "
+            "'invoked incorrectly' apart from 'corpus missed its target'."
         ),
     )
 
@@ -715,6 +728,23 @@ def _print_corpus_report(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the `time` or `corpus` subcommand and return a process exit code.
+
+    Exit codes:
+
+    - ``0``: success.
+    - ``1``: a domain error (`lib.errors.WhisperFlowError`) or an I/O/manifest
+      error (`OSError`/`ValueError`) was raised and reported to stderr.
+    - ``2``: argparse's own usage-error status (missing/invalid arguments,
+      e.g. an unrecognized ``--model`` choice) -- raised via `SystemExit`
+      from inside `argparse.ArgumentParser.parse_args`, not returned from
+      here.
+    - ``3``: ``corpus --strict`` ran successfully but the corpus's overall
+      accuracy/timing-sync missed ``--min-accuracy``/``--min-sync-ratio``.
+      Deliberately distinct from argparse's own ``2`` above so a CI script
+      branching on exit code can tell "invoked incorrectly" apart from
+      "corpus missed its target."
+    """
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
 
@@ -736,7 +766,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_sync_ratio=args.min_sync_ratio,
             )
             if args.strict and not targets_met:
-                return 2
+                return 3
     except WhisperFlowError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
