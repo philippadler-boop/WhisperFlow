@@ -93,7 +93,7 @@ description: "Task list template for feature implementation"
 - [x] T024 [P] Document the `transcribe` command's usage (arguments, options, examples from contracts/cli.md) in `README.md`
 - [x] T025 [P] Add a benchmark helper (`scripts/benchmark.py`) that times a `transcribe` run against a given video and prints elapsed time (SC-002/SC-006, quickstart.md Scenario 8), and, given a small labeled reference corpus (sample videos + their known-correct transcript text), reports rough transcript-accuracy and subtitle-timing-sync percentages against that corpus. Note: SC-003 ("judged by a reviewing user") and SC-004 ("perceived by a viewer") are spec.md's own human-judgment criteria, not automatable pass/fail checks — this script gives `qa` a concrete number to anchor that judgment against, it does not replace it (Principle V, validation reports are `qa`-owned).
 - [x] T026 [P] Integration test confirming no outbound network calls occur during `transcribe` (quickstart.md Scenario 7) in `tests/integration/test_no_network.py`
-- [ ] T027 [P] Lint/type-check cleanup pass across `src/` and `tests/` (`ruff check --fix`)
+- [x] T027 [P] Lint/type-check cleanup pass across `src/` and `tests/` (`ruff check --fix`)
 - [ ] T028 Extend the benchmark helper (depends on T025, same file) to measure transcription accuracy and subtitle-sync percentage against a small labeled sample corpus, giving QA concrete data points for SC-003 (≥90% accuracy) and SC-004 (≥95% sync) in `scripts/benchmark.py`
 - [ ] T029 If T025/T028's benchmark shows the SC-002/SC-006 timing target is missed on reference hardware, adjust the default `--model` size (or document a minimum-hardware note) in `src/cli/main.py` and `contracts/cli.md`
 
