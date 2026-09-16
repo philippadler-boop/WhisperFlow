@@ -57,6 +57,19 @@ def test_dev_dependency_pytest_declared():
     assert "pytest" in dev_dep_names
 
 
+def test_dev_dependency_ruff_declared():
+    # T027: `tests/unit/test_lint.py` shells out to `ruff`, so it needs to
+    # be an installed dependency wherever `pytest` runs (local dev, CI's
+    # `test` job), not just CI's separate `lint` job.
+    data = _load_pyproject()
+    dev_deps = data["project"]["optional-dependencies"]["dev"]
+    dev_dep_names = {
+        dep.split(">")[0].split("<")[0].split("=")[0].split("[")[0].strip().lower()
+        for dep in dev_deps
+    }
+    assert "ruff" in dev_dep_names
+
+
 def test_ruff_lint_config_present():
     data = _load_pyproject()
     ruff_config = data["tool"]["ruff"]
