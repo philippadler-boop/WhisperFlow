@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark helper for `transcribe` runs (T025).
+"""Benchmark helper for `transcribe` runs (T025, extended by T028).
 
 Two independent things this script does, both anchored to specific
 success criteria in `specs/001-video-subtitle-generator/spec.md`:
@@ -31,20 +31,25 @@ success criteria in `specs/001-video-subtitle-generator/spec.md`:
      compare against (the labeled corpus this script expects only supplies
      known-correct *text*, not hand-verified timings).
 
-   These two numbers are printed alongside SC-003 (>=90% accuracy) and
-   SC-004 (>=95% timing-sync) as reference points, **not** as a pass/fail
-   verdict on those criteria. SC-003 is explicitly "judged by a reviewing
-   user" and SC-004 "perceived by a viewer" in spec.md -- both are
-   human-judgment criteria by the spec's own design, not something a
-   script can certify on its own. This script exists to give `qa` a
-   concrete, reproducible number to anchor that human judgment against
-   (Principle V: validation reports are `qa`-owned; this script informs
-   that report, it does not replace it).
+   These two numbers are printed alongside an explicit meets/MISSES verdict
+   (`sc003_note()`/`sc004_note()`) against SC-003's >=90% accuracy target
+   and SC-004's >=95% timing-sync target (`DEFAULT_SC003_MIN_ACCURACY`/
+   `DEFAULT_SC004_MIN_SYNC_RATIO`, overridable via `--min-accuracy`/
+   `--min-sync-ratio`) -- concrete data points for `qa`, **not** a
+   certification of those criteria themselves. SC-003 is explicitly "judged
+   by a reviewing user" and SC-004 "perceived by a viewer" in spec.md --
+   both are human-judgment criteria by the spec's own design, not something
+   a script can certify on its own. This script exists to give `qa` a
+   concrete, reproducible number (and, with ``--strict``, a nonzero exit
+   status) to anchor that human judgment against (Principle V: validation
+   reports are `qa`-owned; this script informs that report, it does not
+   replace it).
 
 Usage::
 
     python scripts/benchmark.py time samples/ten-minutes.mp4 --no-review
     python scripts/benchmark.py corpus tests/fixtures/benchmark_corpus.json
+    python scripts/benchmark.py corpus tests/fixtures/benchmark_corpus.json --strict
 
 Run from the repository root, or with the project installed
 (``pip install -e .``) -- see this module's `_bootstrap_src_path()` for the
@@ -98,6 +103,21 @@ from transcription.transcribe import DEFAULT_MODEL_SIZE  # noqa: E402
 #: read it in the time it was on screen, which is itself a concrete,
 #: automatable proxy correlated with SC-004's "no noticeable lag or lead."
 DEFAULT_MAX_READING_CPS = 20.0
+
+#: SC-003's own threshold: "At least 90% of generated subtitle lines... are
+#: judged by a reviewing user to accurately reflect what was actually said."
+#: `sc003_note()` compares `CorpusBenchmarkResult.overall_accuracy` against
+#: this so the printed report gives `qa` an explicit met/missed verdict for
+#: this automated proxy, mirroring `sc002_sc006_note()`'s own met/OUTSIDE
+#: wording for SC-002/SC-006 -- not a certification of SC-003 itself, which
+#: (per spec.md) is a human-judgment criterion this script can only anchor.
+DEFAULT_SC003_MIN_ACCURACY = 0.90
+
+#: SC-004's own threshold: "At least 95% of generated subtitle lines are
+#: perceived by a viewer as in sync with the spoken audio." `sc004_note()`
+#: compares `CorpusBenchmarkResult.overall_sync_ratio` against this, same
+#: caveat as `DEFAULT_SC003_MIN_ACCURACY` above.
+DEFAULT_SC004_MIN_SYNC_RATIO = 0.95
 
 _WORD_RE = re.compile(r"[\w']+")
 
@@ -215,6 +235,60 @@ def sc002_sc006_note(duration_seconds: float, elapsed_seconds: float) -> str:
         f"video's duration): {verdict} target "
         f"({format_seconds(elapsed_seconds)} elapsed vs. "
         f"{format_seconds(target_seconds)} target)."
+    )
+
+
+def _percent_target_note(
+    *,
+    sc_label: str,
+    metric_name: str,
+    ratio: float,
+    min_ratio: float,
+) -> str:
+    """Shared wording for a "met/OUTSIDE target" note against a min-ratio
+    threshold (SC-003/SC-004's own `_ratio >= min_ratio` shape) -- an
+    unevaluable (`nan`, e.g. an empty corpus) ratio is reported as such
+    rather than as a false pass or fail."""
+    if ratio != ratio:  # noqa: PLR0124 -- nan self-inequality check
+        return f"{sc_label} target: could not be evaluated (empty corpus)."
+    met = ratio >= min_ratio
+    verdict = "meets" if met else "MISSES"
+    return (
+        f"{sc_label} target (>= {min_ratio:.0%} {metric_name}): {verdict} target "
+        f"({ratio:.1%} measured vs. {min_ratio:.0%} target)."
+    )
+
+
+def sc003_note(overall_accuracy: float, *, min_accuracy: float = DEFAULT_SC003_MIN_ACCURACY) -> str:
+    """A one-line "meets/MISSES" verdict for SC-003's >=90% accuracy target,
+    given a `CorpusBenchmarkResult.overall_accuracy` value.
+
+    This is the automated proxy's own verdict, not SC-003 itself -- SC-003
+    is spec.md's human-judgment criterion ("judged by a reviewing user");
+    see this module's docstring and `run_corpus_benchmark()`.
+    """
+    return _percent_target_note(
+        sc_label="SC-003",
+        metric_name="transcript accuracy",
+        ratio=overall_accuracy,
+        min_ratio=min_accuracy,
+    )
+
+
+def sc004_note(
+    overall_sync_ratio: float, *, min_sync_ratio: float = DEFAULT_SC004_MIN_SYNC_RATIO
+) -> str:
+    """A one-line "meets/MISSES" verdict for SC-004's >=95% timing-sync
+    target, given a `CorpusBenchmarkResult.overall_sync_ratio` value.
+
+    Same caveat as `sc003_note()`: this is the automated timing-sync
+    proxy's own verdict, not a certification of SC-004 itself.
+    """
+    return _percent_target_note(
+        sc_label="SC-004",
+        metric_name="timing-sync",
+        ratio=overall_sync_ratio,
+        min_ratio=min_sync_ratio,
     )
 
 
@@ -459,10 +533,20 @@ class CorpusBenchmarkResult:
         """In-sync lines pooled across every entry, divided by the total
         line count across the whole corpus -- weighted by how many
         subtitle lines each video actually produced, rather than by video
-        count."""
+        count.
+
+        `nan` when the corpus produced zero subtitle lines in total,
+        mirroring `overall_accuracy`'s `nan` for the analogous no-data case
+        -- this isn't only reached by an empty manifest, but by any corpus
+        where every entry happened to produce zero lines (e.g. all-silence
+        videos, or a transcription bug producing empty output), and there
+        is no line data at all to judge sync on in that case. Returning a
+        vacuous `1.0` there would make `sc004_note()` print a false "meets
+        target" verdict for a genuinely unevaluable corpus.
+        """
         total_lines = sum(entry.line_count for entry in self.entries)
         if total_lines == 0:
-            return 1.0
+            return float("nan")
         total_in_sync = sum(entry.in_sync_count for entry in self.entries)
         return total_in_sync / total_lines
 
@@ -564,6 +648,31 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             f"timing-sync proxy (default: {DEFAULT_MAX_READING_CPS})."
         ),
     )
+    corpus_parser.add_argument(
+        "--min-accuracy", type=float, default=DEFAULT_SC003_MIN_ACCURACY,
+        help=(
+            "SC-003's minimum overall transcript-accuracy target, as a fraction "
+            f"(default: {DEFAULT_SC003_MIN_ACCURACY})."
+        ),
+    )
+    corpus_parser.add_argument(
+        "--min-sync-ratio", type=float, default=DEFAULT_SC004_MIN_SYNC_RATIO,
+        help=(
+            "SC-004's minimum overall timing-sync target, as a fraction "
+            f"(default: {DEFAULT_SC004_MIN_SYNC_RATIO})."
+        ),
+    )
+    corpus_parser.add_argument(
+        "--strict", action="store_true",
+        help=(
+            "Exit with status 3 if the corpus's overall accuracy/timing-sync "
+            "fall short of --min-accuracy/--min-sync-ratio, instead of just "
+            "reporting the numbers. Status 3 is distinct from argparse's own "
+            "status 2 for usage errors (e.g. a missing argument or an invalid "
+            "--model choice), so a CI script branching on exit code can tell "
+            "'invoked incorrectly' apart from 'corpus missed its target'."
+        ),
+    )
 
     return parser
 
@@ -578,7 +687,16 @@ def _print_timing_report(result: TimingResult, out: Any) -> None:
     print(sc002_sc006_note(result.video_duration_seconds, result.elapsed_seconds), file=out)
 
 
-def _print_corpus_report(result: CorpusBenchmarkResult, out: Any) -> None:
+def _print_corpus_report(
+    result: CorpusBenchmarkResult,
+    out: Any,
+    *,
+    min_accuracy: float = DEFAULT_SC003_MIN_ACCURACY,
+    min_sync_ratio: float = DEFAULT_SC004_MIN_SYNC_RATIO,
+) -> bool:
+    """Print the corpus report and return whether both SC-003/SC-004
+    targets were met (`nan`, i.e. an empty corpus, counts as "not met" here
+    -- there's no data to certify a pass on)."""
     print("Reference-corpus benchmark (rough automated proxy -- see script docstring)", file=out)
     for entry in result.entries:
         print(
@@ -588,25 +706,45 @@ def _print_corpus_report(result: CorpusBenchmarkResult, out: Any) -> None:
             f"({entry.in_sync_count}/{entry.line_count} lines in sync)",
             file=out,
         )
-    print(
-        f"Overall transcript accuracy: {result.overall_accuracy:.1%} "
-        "(SC-003 anchor: reviewing users judge >= 90% of lines accurate)",
-        file=out,
-    )
-    print(
-        f"Overall subtitle timing-sync: {result.overall_sync_ratio:.1%} "
-        "(SC-004 anchor: viewers perceive >= 95% of lines as in sync)",
-        file=out,
-    )
+    print(f"Overall transcript accuracy: {result.overall_accuracy:.1%}", file=out)
+    print(f"Overall subtitle timing-sync: {result.overall_sync_ratio:.1%}", file=out)
+    print(sc003_note(result.overall_accuracy, min_accuracy=min_accuracy), file=out)
+    print(sc004_note(result.overall_sync_ratio, min_sync_ratio=min_sync_ratio), file=out)
     print(
         "Note: SC-003/SC-004 are spec.md's own human-judgment criteria -- these "
-        "numbers are a rough automated proxy for `qa` to anchor that judgment "
-        "against, not a substitute for it.",
+        "numbers and verdicts are a rough automated proxy for `qa` to anchor "
+        "that judgment against, not a substitute for it.",
         file=out,
     )
+    accuracy_met = (
+        result.overall_accuracy == result.overall_accuracy  # not nan
+        and result.overall_accuracy >= min_accuracy
+    )
+    sync_met = (
+        result.overall_sync_ratio == result.overall_sync_ratio  # not nan
+        and result.overall_sync_ratio >= min_sync_ratio
+    )
+    return accuracy_met and sync_met
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the `time` or `corpus` subcommand and return a process exit code.
+
+    Exit codes:
+
+    - ``0``: success.
+    - ``1``: a domain error (`lib.errors.WhisperFlowError`) or an I/O/manifest
+      error (`OSError`/`ValueError`) was raised and reported to stderr.
+    - ``2``: argparse's own usage-error status (missing/invalid arguments,
+      e.g. an unrecognized ``--model`` choice) -- raised via `SystemExit`
+      from inside `argparse.ArgumentParser.parse_args`, not returned from
+      here.
+    - ``3``: ``corpus --strict`` ran successfully but the corpus's overall
+      accuracy/timing-sync missed ``--min-accuracy``/``--min-sync-ratio``.
+      Deliberately distinct from argparse's own ``2`` above so a CI script
+      branching on exit code can tell "invoked incorrectly" apart from
+      "corpus missed its target."
+    """
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
 
@@ -621,7 +759,14 @@ def main(argv: list[str] | None = None) -> int:
             corpus_result = run_corpus_benchmark(
                 entries, model_size=args.model, max_reading_cps=args.max_reading_cps
             )
-            _print_corpus_report(corpus_result, sys.stdout)
+            targets_met = _print_corpus_report(
+                corpus_result,
+                sys.stdout,
+                min_accuracy=args.min_accuracy,
+                min_sync_ratio=args.min_sync_ratio,
+            )
+            if args.strict and not targets_met:
+                return 3
     except WhisperFlowError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

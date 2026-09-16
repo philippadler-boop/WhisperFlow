@@ -211,10 +211,16 @@ python scripts/benchmark.py corpus tests/fixtures/benchmark_corpus.json
 A corpus manifest is a JSON list of `{"video": ..., "reference_text": ...}`
 entries (or `"reference_text_path"` pointing at a plain-text file), each
 giving a sample video's known-correct transcript. The reported accuracy and
-timing-sync percentages are rough, automated proxies for SC-003 and SC-004 --
-both of those criteria are explicitly judged by a human (a reviewing user,
-a viewer) in spec.md, so this script gives `qa` a concrete number to anchor
-that judgment against, not a replacement for it.
+timing-sync percentages are printed alongside an explicit meets/MISSES
+verdict against SC-003's >=90% accuracy target and SC-004's >=95%
+timing-sync target (overridable via `--min-accuracy`/`--min-sync-ratio`;
+pass `--strict` to also exit with status `3` if either target is missed,
+e.g. for a CI gate -- distinct from argparse's own status `2` for usage
+errors, so a CI script can tell "invoked incorrectly" apart from "corpus
+missed its target"). Both criteria are explicitly judged by a human (a reviewing
+user, a viewer) in spec.md, so this script gives `qa` a concrete,
+reproducible number to anchor that judgment against, not a replacement
+for it.
 
 ## Windows Installer Build
 
