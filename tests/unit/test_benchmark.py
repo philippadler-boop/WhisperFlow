@@ -206,6 +206,47 @@ class TestLoadCorpus:
         with pytest.raises(ValueError, match="reference_text"):
             benchmark.load_corpus(manifest)
 
+    def test_non_string_video_value_raises_value_error(self, tmp_path: Path):
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps([{"video": 123, "reference_text": "hi"}]), encoding="utf-8"
+        )
+
+        with pytest.raises(ValueError, match="'video' value that isn't a string"):
+            benchmark.load_corpus(manifest)
+
+    def test_non_string_reference_text_value_raises_value_error(self, tmp_path: Path):
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps([{"video": "video1.mp4", "reference_text": ["not", "a", "string"]}]),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="'reference_text' value that isn't a string"):
+            benchmark.load_corpus(manifest)
+
+    def test_non_string_reference_text_path_value_raises_value_error(self, tmp_path: Path):
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps([{"video": "video1.mp4", "reference_text_path": 42}]),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="'reference_text_path' value that isn't a string"):
+            benchmark.load_corpus(manifest)
+
+    def test_non_string_label_value_raises_value_error(self, tmp_path: Path):
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps(
+                [{"video": "video1.mp4", "reference_text": "hi", "label": {"nested": True}}]
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="'label' value that isn't a string"):
+            benchmark.load_corpus(manifest)
+
 
 # ---------------------------------------------------------------------------
 # time_transcription

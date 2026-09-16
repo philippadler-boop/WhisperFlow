@@ -364,8 +364,10 @@ def load_corpus(manifest_path: Path | str) -> list[CorpusEntry]:
         ]
 
     Raises:
-        ValueError: the manifest isn't a JSON list, or an entry is missing
-            ``"video"`` or both reference-text keys.
+        ValueError: the manifest isn't a JSON list, an entry is missing
+            ``"video"`` or both reference-text keys, or an entry's
+            ``"video"``, ``"reference_text"``, ``"reference_text_path"``, or
+            ``"label"`` value is present but not a JSON string.
     """
     manifest_path = Path(manifest_path)
     raw = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -383,11 +385,28 @@ def load_corpus(manifest_path: Path | str) -> list[CorpusEntry]:
                 f"corpus entry {index} in '{manifest_path}' is missing the required "
                 "'video' key"
             )
+        if not isinstance(item["video"], str):
+            raise ValueError(
+                f"corpus entry {index} in '{manifest_path}' has a 'video' value "
+                f"that isn't a string, got {type(item['video']).__name__}"
+            )
         video_path = _resolve_relative(base_dir, item["video"])
 
         if "reference_text" in item:
-            reference_text = str(item["reference_text"])
+            if not isinstance(item["reference_text"], str):
+                raise ValueError(
+                    f"corpus entry {index} ({item['video']!r}) in '{manifest_path}' has "
+                    "a 'reference_text' value that isn't a string, got "
+                    f"{type(item['reference_text']).__name__}"
+                )
+            reference_text = item["reference_text"]
         elif "reference_text_path" in item:
+            if not isinstance(item["reference_text_path"], str):
+                raise ValueError(
+                    f"corpus entry {index} ({item['video']!r}) in '{manifest_path}' has "
+                    "a 'reference_text_path' value that isn't a string, got "
+                    f"{type(item['reference_text_path']).__name__}"
+                )
             reference_text = _resolve_relative(base_dir, item["reference_text_path"]).read_text(
                 encoding="utf-8"
             )
@@ -397,7 +416,12 @@ def load_corpus(manifest_path: Path | str) -> list[CorpusEntry]:
                 "have either 'reference_text' or 'reference_text_path'"
             )
 
-        label = str(item.get("label") or video_path.name)
+        if "label" in item and item["label"] is not None and not isinstance(item["label"], str):
+            raise ValueError(
+                f"corpus entry {index} ({item['video']!r}) in '{manifest_path}' has a "
+                f"'label' value that isn't a string, got {type(item['label']).__name__}"
+            )
+        label = item.get("label") or video_path.name
         entries.append(
             CorpusEntry(label=label, video_path=video_path, reference_text=reference_text)
         )

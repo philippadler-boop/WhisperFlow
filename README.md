@@ -200,7 +200,11 @@ percentages against it:
 # Time a single run (SC-002/SC-006, quickstart.md Scenario 8)
 python scripts/benchmark.py time samples/ten-minutes.mp4 --model tiny
 
-# Score accuracy/timing-sync against a labeled reference corpus
+# Score accuracy/timing-sync against a labeled reference corpus.
+# tests/fixtures/benchmark_corpus.json is a real, checked-in single-entry
+# corpus (clear_speech.mp4 + its docs/validation/T011.md ground-truth
+# transcript) -- a working example, not a template; author your own
+# manifest for a larger/real corpus.
 python scripts/benchmark.py corpus tests/fixtures/benchmark_corpus.json
 ```
 

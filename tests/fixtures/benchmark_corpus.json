@@ -1,0 +1,7 @@
+[
+  {
+    "video": "clear_speech.mp4",
+    "reference_text": "Hello, this is a test on the whisper flow sub-title generator.",
+    "label": "clear_speech"
+  }
+]
