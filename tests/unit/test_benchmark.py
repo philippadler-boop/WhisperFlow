@@ -330,6 +330,53 @@ class TestScSc006Note:
 
 
 # ---------------------------------------------------------------------------
+# sc003_note / sc004_note (T028)
+# ---------------------------------------------------------------------------
+
+
+class TestSc003Note:
+    def test_meets_target_at_exactly_the_threshold(self):
+        note = benchmark.sc003_note(0.90)
+        assert "SC-003" in note
+        assert "meets target" in note
+
+    def test_meets_target_above_the_threshold(self):
+        note = benchmark.sc003_note(0.95)
+        assert "meets target" in note
+
+    def test_misses_target_below_the_threshold(self):
+        note = benchmark.sc003_note(0.89)
+        assert "MISSES target" in note
+
+    def test_custom_min_accuracy_is_honored(self):
+        assert "meets target" in benchmark.sc003_note(0.80, min_accuracy=0.75)
+        assert "MISSES target" in benchmark.sc003_note(0.80, min_accuracy=0.85)
+
+    def test_nan_accuracy_is_reported_as_unevaluated(self):
+        note = benchmark.sc003_note(float("nan"))
+        assert "could not be evaluated" in note
+
+
+class TestSc004Note:
+    def test_meets_target_at_exactly_the_threshold(self):
+        note = benchmark.sc004_note(0.95)
+        assert "SC-004" in note
+        assert "meets target" in note
+
+    def test_misses_target_below_the_threshold(self):
+        note = benchmark.sc004_note(0.94)
+        assert "MISSES target" in note
+
+    def test_custom_min_sync_ratio_is_honored(self):
+        assert "meets target" in benchmark.sc004_note(0.80, min_sync_ratio=0.75)
+        assert "MISSES target" in benchmark.sc004_note(0.80, min_sync_ratio=0.85)
+
+    def test_nan_sync_ratio_is_reported_as_unevaluated(self):
+        note = benchmark.sc004_note(float("nan"))
+        assert "could not be evaluated" in note
+
+
+# ---------------------------------------------------------------------------
 # run_corpus_benchmark
 # ---------------------------------------------------------------------------
 
@@ -473,8 +520,9 @@ class TestMainCli:
         out = capsys.readouterr().out
         assert "Overall transcript accuracy: 100.0%" in out
         assert "Overall subtitle timing-sync: 100.0%" in out
-        assert "SC-003 anchor" in out
-        assert "SC-004 anchor" in out
+        assert "SC-003 target" in out
+        assert "SC-004 target" in out
+        assert "meets target" in out
 
     def test_whisperflow_error_is_reported_as_single_stderr_line_with_exit_1(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
@@ -504,3 +552,136 @@ class TestMainCli:
     def test_no_subcommand_exits_nonzero_via_argparse(self):
         with pytest.raises(SystemExit):
             benchmark.main([])
+
+    def test_corpus_strict_returns_zero_when_targets_are_met(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+    ):
+        video = _video(tmp_path)
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps([{"video": "clip.mp4", "reference_text": "hello world"}]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            benchmark,
+            "run_pipeline",
+            lambda **kwargs: SubtitleFile(
+                source_video=video, lines=[_line(1, 0.0, 5.0, "hello world")]
+            ),
+        )
+
+        exit_code = benchmark.main(["corpus", str(manifest), "--strict"])
+
+        assert exit_code == 0
+
+    def test_corpus_strict_returns_nonzero_when_accuracy_target_is_missed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+    ):
+        video = _video(tmp_path)
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps([{"video": "clip.mp4", "reference_text": "hello world"}]),
+            encoding="utf-8",
+        )
+        # Completely wrong hypothesis -> 0% accuracy, well below any threshold.
+        monkeypatch.setattr(
+            benchmark,
+            "run_pipeline",
+            lambda **kwargs: SubtitleFile(
+                source_video=video, lines=[_line(1, 0.0, 5.0, "totally different text")]
+            ),
+        )
+
+        exit_code = benchmark.main(["corpus", str(manifest), "--strict"])
+
+        assert exit_code == 2
+        out = capsys.readouterr().out
+        assert "MISSES target" in out
+
+    def test_corpus_without_strict_returns_zero_even_when_targets_are_missed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+    ):
+        video = _video(tmp_path)
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps([{"video": "clip.mp4", "reference_text": "hello world"}]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            benchmark,
+            "run_pipeline",
+            lambda **kwargs: SubtitleFile(
+                source_video=video, lines=[_line(1, 0.0, 5.0, "totally different text")]
+            ),
+        )
+
+        exit_code = benchmark.main(["corpus", str(manifest)])
+
+        assert exit_code == 0
+
+    def test_corpus_custom_min_accuracy_and_min_sync_ratio_are_honored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+    ):
+        video = _video(tmp_path)
+        manifest = tmp_path / "corpus.json"
+        manifest.write_text(
+            json.dumps([{"video": "clip.mp4", "reference_text": "hello world"}]),
+            encoding="utf-8",
+        )
+        # 1 substitution out of 2 reference words -> 50% accuracy.
+        monkeypatch.setattr(
+            benchmark,
+            "run_pipeline",
+            lambda **kwargs: SubtitleFile(
+                source_video=video, lines=[_line(1, 0.0, 5.0, "hello there")]
+            ),
+        )
+
+        exit_code = benchmark.main(
+            ["corpus", str(manifest), "--strict", "--min-accuracy", "0.4"]
+        )
+
+        assert exit_code == 0
+        out = capsys.readouterr().out
+        assert "meets target" in out
+
+
+# ---------------------------------------------------------------------------
+# _print_corpus_report (T028)
+# ---------------------------------------------------------------------------
+
+
+class TestPrintCorpusReport:
+    def test_returns_true_when_both_targets_met(self):
+        import io
+
+        result = benchmark.CorpusBenchmarkResult(
+            entries=[
+                benchmark.CorpusEntryResult(
+                    label="a", accuracy=1.0, sync_ratio=1.0, line_count=1, in_sync_count=1
+                )
+            ]
+        )
+        out = io.StringIO()
+        assert benchmark._print_corpus_report(result, out) is True
+
+    def test_returns_false_when_accuracy_target_missed(self):
+        import io
+
+        result = benchmark.CorpusBenchmarkResult(
+            entries=[
+                benchmark.CorpusEntryResult(
+                    label="a", accuracy=0.5, sync_ratio=1.0, line_count=1, in_sync_count=1
+                )
+            ]
+        )
+        out = io.StringIO()
+        assert benchmark._print_corpus_report(result, out) is False
+
+    def test_returns_false_for_empty_corpus_even_though_ratios_are_vacuous(self):
+        import io
+
+        result = benchmark.CorpusBenchmarkResult(entries=[])
+        out = io.StringIO()
+        # overall_accuracy is nan for an empty corpus -- never counted as "met".
+        assert benchmark._print_corpus_report(result, out) is False
