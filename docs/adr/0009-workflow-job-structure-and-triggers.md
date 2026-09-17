@@ -1,7 +1,11 @@
 # 0009: Job Structure for Automated `reviewer`/`qa` and the Round-Cap Raise
 
-> **Status**: Proposed — pending human approval at the Design Gate
-> (Principle II). Not yet binding until sign-off.
+> **Status**: Accepted — approved at the Design Gate (Principle II) on
+> 2026-09-17. Merging PR #133 was the approval action, per Constitution
+> Principle IV ("It merges to `main` via PR once the plan is approved —
+> that merge is the approval action"). The actor-check/token facts this
+> ADR shares with ADR 0007 still require an invocation-based smoke test
+> before real use (Constitution Principle V).
 
 ## Context
 

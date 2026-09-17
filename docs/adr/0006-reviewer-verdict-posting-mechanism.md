@@ -1,7 +1,9 @@
 # 0006: Posting Automated `reviewer`'s Verdict as a Real GitHub PR Review
 
-> **Status**: Proposed — pending human approval at the Design Gate
-> (Principle II). Not yet binding until sign-off.
+> **Status**: Accepted — approved at the Design Gate (Principle II) on
+> 2026-09-17. Merging PR #133 was the approval action, per Constitution
+> Principle IV ("It merges to `main` via PR once the plan is approved —
+> that merge is the approval action").
 
 ## Context
 
