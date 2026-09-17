@@ -35,12 +35,29 @@ during a retroactive review; see `reviewer.md` for the current instruction.
 
 ## Where things live
 
-- `docs/ideas/` — raw, human-authored idea notes.
+- `docs/ideas/` — raw, human-authored idea notes; also where `analyst`
+  writes a concept brief/draft requirements for a **not-yet-created**
+  feature (see next bullet) before `/speckit.specify` has run for it.
 - `specs/<feature>/` — GitHub Spec Kit's own layout: `spec.md`
   (requirements), `research.md`/`data-model.md`/`contracts/`/`quickstart.md`
   (`/speckit.plan` output), `tasks.md` (`/speckit.tasks` output). No
   separate hand-authored architecture doc — `plan.md` and its companions
-  are the design record.
+  are the design record. **This directory is created by `/speckit.specify`
+  (run in the interactive/orchestrating session, which has the shell
+  access the command's setup script needs), never by `analyst` itself** —
+  `analyst` has no Bash and cannot create the feature branch or
+  `.specify/feature.json` that `/speckit.specify` also produces. The
+  correct order for a brand-new feature is: idea note in `docs/ideas/` →
+  `/speckit.specify` (scaffolds branch, `.specify/feature.json`,
+  `specs/<feature>/spec.md` skeleton, `checklists/requirements.md`) →
+  `analyst` revises that `spec.md` in place (concept brief + numbered
+  FR-xxx list, `[NEEDS CLARIFICATION]` markers for genuine ambiguity) →
+  Requirements Gate. Feature 002 skipped the `/speckit.specify` step by
+  mistake (analyst wrote `spec.md` directly via `Write`), which left
+  `.specify/feature.json` pointing at the wrong feature until caught
+  during `/speckit.plan` — see `specs/002-reviewer-qa-automation/plan.md`'s
+  "Process Correction" for the full account. `analyst.md` now says this
+  explicitly so it isn't repeated for feature 003 and beyond.
 - `docs/adr/` — one ADR per non-trivial architectural decision surfaced
   during the Plan phase, structured as Context / Decision / Alternatives
   Considered / Consequences. A companion to `plan.md`, not a replacement.
