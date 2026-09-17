@@ -21,7 +21,7 @@ grounding from.
   `developer → reviewer → qa` runs to completion (an APPROVE verdict and
   green CI, or the round cap) with no human action beyond the final merge
   decision. This is a conscious, recorded tradeoff, not a silent removal
-  of `claude-dev-agent.yml`'s documented "not a fully closed loop" safety
+  of `claude-agents-pipeline.yml`'s documented "not a fully closed loop" safety
   property — the safety property is deliberately being closed, with the
   owner's explicit sign-off.
 - **Alternatives considered**: (a) an additional "approved for
@@ -88,7 +88,7 @@ grounding from.
   the fix is still in flight. A quiet-period timer — rejected per
   Rationale above (slower and not actually more certain).
 - **Design implication for Phase 1 / architect**: the workflow's
-  `pull_request_review` trigger (already present in `claude-dev-agent.yml`
+  `pull_request_review` trigger (already present in `claude-agents-pipeline.yml`
   for the `changes_requested` path) needs a companion condition path for
   `state == 'approved'` that (a) confirms the review's `commit_id` matches
   the PR's current `head.sha` (an approval on a stale commit, superseded
@@ -122,10 +122,10 @@ grounding from.
 
 Beyond the five resolved decisions above, Phase 1 (data-model.md,
 contracts/) needs the following facts about the existing automation this
-feature extends, gathered from `.github/workflows/claude-dev-agent.yml`,
+feature extends, gathered from `.github/workflows/claude-agents-pipeline.yml`,
 `.github/workflows/ci.yml`, and `.claude/agents/{reviewer,qa}.md`:
 
-- `claude-dev-agent.yml` already uses `anthropics/claude-code-action@v1`
+- `claude-agents-pipeline.yml` already uses `anthropics/claude-code-action@v1`
   with `--agent <role> --model sonnet --allowedTools "<comma list>"` for
   `developer`'s automation-mode invocation, and deliberately omits
   `github_token` so the Claude GitHub App's own token (not the default
@@ -145,9 +145,9 @@ feature extends, gathered from `.github/workflows/claude-dev-agent.yml`,
   permission — `qa.md` documents this as a behavioral rule for the agent
   to follow, not a mechanical restriction the workflow enforces).
 - The existing `MAX_AUTO_FIX_ROUNDS` round-cap check (`gh api` +
-  `CHANGES_REQUESTED` count) already exists in `claude-dev-agent.yml` and
+  `CHANGES_REQUESTED` count) already exists in `claude-agents-pipeline.yml` and
   needs only its cap-value constant changed (Decision 3), not new logic.
-- `claude-dev-agent.yml`'s existing prompt-injection-safety pattern
+- `claude-agents-pipeline.yml`'s existing prompt-injection-safety pattern
   (attacker-controlled `${{ github.event.* }}` text routed through `env:`
   then `$VAR` shell expansion, never spliced directly into `run:` script
   text) applies equally to any new attacker-controlled text this feature

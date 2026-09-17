@@ -1,4 +1,4 @@
-name: Claude Dev Agent
+name: Claude Agents Pipeline
 
 # M8 (unattended work): separate from claude.yml on purpose. claude.yml
 # stays the interactive @claude-mention workflow; this one runs in
@@ -41,7 +41,7 @@ env:
   # Safety net for the pull_request_review path only (see the "Count
   # prior request-changes rounds" and "Stop and hand back" steps below).
   # Once this many CHANGES_REQUESTED reviews have accumulated on a PR,
-  # claude-dev-agent stops auto-fixing and posts a comment instead of
+  # claude-agents-pipeline stops auto-fixing and posts a comment instead of
   # dispatching another round -- a human needs to look at it directly, or
   # re-invoke `developer` manually to keep going deliberately. Tune
   # freely; nothing else in this file depends on the specific number.
@@ -106,7 +106,7 @@ jobs:
           ROUND_COUNT: ${{ steps.round_count.outputs.count }}
         run: |
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(cat <<EOF
-          Auto-fix round cap ($ROUND_COUNT/$MAX_AUTO_FIX_ROUNDS CHANGES_REQUESTED reviews) reached on this PR -- claude-dev-agent is stopping here rather than dispatching another automatic fix. A human should look at the remaining review feedback directly, or re-invoke \`developer\` manually to continue deliberately.
+          Auto-fix round cap ($ROUND_COUNT/$MAX_AUTO_FIX_ROUNDS CHANGES_REQUESTED reviews) reached on this PR -- claude-agents-pipeline is stopping here rather than dispatching another automatic fix. A human should look at the remaining review feedback directly, or re-invoke \`developer\` manually to continue deliberately.
           EOF
           )"
           echo "::notice::Round cap reached ($ROUND_COUNT/$MAX_AUTO_FIX_ROUNDS) -- skipping the Claude Code step."

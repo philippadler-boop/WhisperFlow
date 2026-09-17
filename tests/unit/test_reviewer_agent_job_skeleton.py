@@ -1,5 +1,5 @@
 """Unit tests for issue #140 (T103: "Add the `reviewer-agent` job skeleton
-to `.github/workflows/claude-dev-agent.yml`").
+to `.github/workflows/claude-agents-pipeline.yml`").
 
 Per ADR 0008/ADR 0009 and FR-002/contracts/automation-triggers.md's
 tool-grant table, this task adds an inert `reviewer-agent` job -- gated by
@@ -23,7 +23,7 @@ be a heavier footprint than a handful of anchored regexes on a file this
 targeted.
 
 NOTE on why the reviewer-agent-specific tests below are conditionally
-skipped: the actual `.github/workflows/claude-dev-agent.yml` edit this
+skipped: the actual `.github/workflows/claude-agents-pipeline.yml` edit this
 task calls for could not be pushed from this session -- the automation
 GitHub App token this environment authenticates as lacks the `workflows`
 permission needed to push changes under `.github/workflows/` (GitHub
@@ -33,7 +33,7 @@ same limitation `tests/unit/test_agent_model_pins.py` (issue #59) and
 `tests/unit/test_pr_closing_keyword_convention.py` (issue #74, see PR
 #76) already hit and documented. A human with real push access must
 apply the diff given in this PR's description directly to
-`claude-dev-agent.yml`; these tests are written against the target state
+`claude-agents-pipeline.yml`; these tests are written against the target state
 that diff produces and will start running for real the moment it lands
 (no test-file edit needed) -- they skip cleanly rather than failing CI
 in the meantime.
@@ -47,7 +47,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "claude-dev-agent.yml"
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "claude-agents-pipeline.yml"
 
 
 def _workflow_text() -> str:
@@ -61,7 +61,7 @@ def _reviewer_agent_job_present() -> bool:
 skip_until_workflow_diff_applied = pytest.mark.skipif(
     not _reviewer_agent_job_present(),
     reason=(
-        "reviewer-agent job not yet present in claude-dev-agent.yml -- the "
+        "reviewer-agent job not yet present in claude-agents-pipeline.yml -- the "
         "automation GitHub App token used to push this PR lacks `workflows` "
         "permission (same limitation as issues #59/#74); see this PR's "
         "description for the exact diff a human must apply directly."
@@ -81,7 +81,7 @@ def _reviewer_agent_job_block() -> str:
     """
     text = _workflow_text()
     match = re.search(r"^  reviewer-agent:\n(.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", text, re.M | re.S)
-    assert match, "no top-level `reviewer-agent:` job found in claude-dev-agent.yml"
+    assert match, "no top-level `reviewer-agent:` job found in claude-agents-pipeline.yml"
     return match.group(1)
 
 

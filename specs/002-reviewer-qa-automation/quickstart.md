@@ -12,7 +12,7 @@ state/event shapes are in [data-model.md](data-model.md).
 - `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA` exist as repo
   secrets (confirmed present 2026-09-17; re-verify with
   `gh secret list --repo <owner>/<repo>` before relying on this).
-- The extended `claude-dev-agent.yml` (this feature's implementation) is
+- The extended `claude-agents-pipeline.yml` (this feature's implementation) is
   merged to `main` and active.
 - A throwaway issue/PR available for smoke testing before any real work
   is routed through this feature (FR-009 requires this before real use).

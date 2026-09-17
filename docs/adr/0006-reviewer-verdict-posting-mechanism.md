@@ -15,7 +15,7 @@ FR-004 requires the *workflow* to post `reviewer`'s verdict (approve, or
 request-changes with specific points) as a real GitHub PR review — using
 the same `--approve` / `--request-changes --body-file <content>` semantics
 a human invoker already uses today (per research.md's note) — specifically
-so `claude-dev-agent.yml`'s existing `pull_request_review`/
+so `claude-agents-pipeline.yml`'s existing `pull_request_review`/
 `changes_requested` trigger, and this feature's new `approved` trigger
 (ADR 0007, data-model.md `PRReviewEvent`), fire off a genuine review
 object rather than a comment or a workflow log line.

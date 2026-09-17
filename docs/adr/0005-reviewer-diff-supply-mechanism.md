@@ -25,7 +25,7 @@ uses today: paste diff text (`git diff main...<branch>` / `gh pr diff
 choose between (or combine) these without a human doing either step by
 hand.
 
-`claude-dev-agent.yml`'s existing "Build prompt for this trigger" step
+`claude-agents-pipeline.yml`'s existing "Build prompt for this trigger" step
 already establishes the safe pattern for getting attacker-controlled
 webhook text into a prompt: pass it through `env:`, reference it as
 `"$VAR"` inside a heredoc that is written to `GITHUB_OUTPUT`, and never
@@ -105,7 +105,7 @@ Combine both mechanisms rather than choosing one exclusively:
   delimiter; it MUST NOT splice `gh pr diff` output into a `run:` script
   body via `${{ }}` under any circumstance, consistent with the
   prompt-injection-safety rationale already documented in
-  `claude-dev-agent.yml` and established after PR #79 / issue #75.
+  `claude-agents-pipeline.yml` and established after PR #79 / issue #75.
 - The checkout step must target the PR's `head.sha` (not just its branch
   name), to avoid a race where the branch moves between the triggering
   event and the checkout step actually running — the same stale-commit
@@ -118,7 +118,7 @@ Combine both mechanisms rather than choosing one exclusively:
   FR-013 rather than invoking `reviewer` with an empty or missing diff and
   letting it guess.
 - This mechanism is new, unexercised machinery in the same category
-  `claude-dev-agent.yml`'s own header comment already flags for other
+  `claude-agents-pipeline.yml`'s own header comment already flags for other
   parts of this file ("smoke-test... with a throwaway PR... before
   trusting it on real work") — it should be exercised end-to-end against
   a throwaway PR before being relied on for real work, per FR-009/SC-003.

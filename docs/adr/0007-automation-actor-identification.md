@@ -26,13 +26,13 @@ approval.
 `data-model.md` explicitly declines to assume an answer and asks
 `architect` to ground this in evidence rather than assumption
 (Constitution Principle V). The one directly relevant fact already on
-record in this repo (research.md, `claude-dev-agent.yml`'s own comments)
+record in this repo (research.md, `claude-agents-pipeline.yml`'s own comments)
 is: `developer`'s automation-mode commits show `claude[bot]` as
 author/committer, *because* `github_token` is deliberately omitted from
 its `claude-code-action` invocation — omitting it makes the action
 authenticate as the Claude GitHub App instead of the default
 `GITHUB_TOKEN`. This matters for a second, independent reason beyond
-identity: `claude-dev-agent.yml` records omitting `github_token`
+identity: `claude-agents-pipeline.yml` records omitting `github_token`
 specifically because "GitHub does not trigger downstream workflows (CI,
 traceability) on commits pushed with the default `GITHUB_TOKEN`" — a
 well-documented GitHub Actions restriction that events performed using the
