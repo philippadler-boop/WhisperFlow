@@ -25,8 +25,8 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Confirm prerequisites this feature depends on are actually in place before any workflow edit begins.
 
-- [ ] T001 Confirm `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA` exist as repo secrets (`gh secret list`) — already provisioned per spec.md's Manual Setup Required, but re-verify at implementation start since they were created in a prior session (FR-009, FR-014)
-- [ ] T002 [P] Confirm the automated bot identity `developer`'s existing automation-mode invocation authenticates as, by inspecting a real recent `developer`-authored commit (`git log --format='%an <%ae>'` on a `claude-dev`-labeled PR branch) — this is the empirical fact ADR 0007's actor-check and ADR 0009's `sender` check both depend on; record the confirmed login string in a code comment at the point it's used in T008/T012 rather than assuming `claude[bot]` by analogy alone (ADR 0007 Consequences)
+- [ ] T101 Confirm `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA` exist as repo secrets (`gh secret list`) — already provisioned per spec.md's Manual Setup Required, but re-verify at implementation start since they were created in a prior session (FR-009, FR-014)
+- [ ] T102 [P] Confirm the automated bot identity `developer`'s existing automation-mode invocation authenticates as, by inspecting a real recent `developer`-authored commit (`git log --format='%an <%ae>'` on a `claude-dev`-labeled PR branch) — this is the empirical fact ADR 0007's actor-check and ADR 0009's `sender` check both depend on; record the confirmed login string in a code comment at the point it's used in T108/T112 rather than assuming `claude[bot]` by analogy alone (ADR 0007 Consequences)
 
 **Checkpoint**: Prerequisites confirmed — workflow editing can begin
 
@@ -38,9 +38,9 @@ description: "Task list template for feature implementation"
 
 **⚠️ CRITICAL**: No later phase's tasks can be verified end-to-end until this phase is complete.
 
-- [ ] T003 Add the `reviewer-agent` job skeleton to `.github/workflows/claude-dev-agent.yml`: no `github_token` input (mirroring `dev-agent`'s existing omission), `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_REVIEWER }}` per ADR 0008, `--agent reviewer --model sonnet --allowedTools "Read,Grep,Glob"` per FR-002/contracts/automation-triggers.md's tool-grant table — trigger condition left as `if: false` placeholder for now, wired for real in Phase 3 (ADR 0008, ADR 0009)
-- [ ] T004 Add the `qa-agent` job skeleton to `.github/workflows/claude-dev-agent.yml`: no `github_token` input, `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_QA }}` per ADR 0008, `--agent qa --model sonnet --allowedTools "<qa.md's exact tools: line>"` per FR-005/FR-012 (read `.claude/agents/qa.md` to get the exact list — do not paraphrase it) — trigger condition left as `if: false` placeholder for now, wired for real in Phase 5 (ADR 0008, ADR 0009)
-- [ ] T005 Update the `MAX_AUTO_FIX_ROUNDS` environment constant in `.github/workflows/claude-dev-agent.yml` from `3` to `5` (Resolved Decision 3, FR-008) — no other change to the existing counting query or "Stop and hand back" step, both of which remain solely inside `dev-agent` (ADR 0009)
+- [ ] T103 Add the `reviewer-agent` job skeleton to `.github/workflows/claude-dev-agent.yml`: no `github_token` input (mirroring `dev-agent`'s existing omission), `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_REVIEWER }}` per ADR 0008, `--agent reviewer --model sonnet --allowedTools "Read,Grep,Glob"` per FR-002/contracts/automation-triggers.md's tool-grant table — trigger condition left as `if: false` placeholder for now, wired for real in Phase 3 (ADR 0008, ADR 0009)
+- [ ] T104 Add the `qa-agent` job skeleton to `.github/workflows/claude-dev-agent.yml`: no `github_token` input, `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_QA }}` per ADR 0008, `--agent qa --model sonnet --allowedTools "<qa.md's exact tools: line>"` per FR-005/FR-012 (read `.claude/agents/qa.md` to get the exact list — do not paraphrase it) — trigger condition left as `if: false` placeholder for now, wired for real in Phase 5 (ADR 0008, ADR 0009)
+- [ ] T105 Update the `MAX_AUTO_FIX_ROUNDS` environment constant in `.github/workflows/claude-dev-agent.yml` from `3` to `5` (Resolved Decision 3, FR-008) — no other change to the existing counting query or "Stop and hand back" step, both of which remain solely inside `dev-agent` (ADR 0009)
 
 **Checkpoint**: Both new jobs exist in the workflow file with correct, isolated tool/secret grants and no live trigger yet — safe to merge without behavior change, since both are gated `if: false`
 
@@ -54,11 +54,11 @@ description: "Task list template for feature implementation"
 
 ### Implementation for US1
 
-- [ ] T006 [US1] Replace `reviewer-agent`'s `if: false` placeholder (T003) with the real trigger condition: `on: pull_request: types: [opened, synchronize]`, scoped by `if: github.event.sender.login == '<bot login from T002>' && github.event.sender.type == 'Bot'` in `.github/workflows/claude-dev-agent.yml` (ADR 0009, FR-007's actor-identification principle applied to `sender`)
-- [ ] T007 [US1] Add a `Checkout PR head` step to `reviewer-agent`, checking out `github.event.pull_request.head.sha` (not `main`, not a bare default-branch checkout) in `.github/workflows/claude-dev-agent.yml` (ADR 0005 Decision 1)
-- [ ] T008 [US1] Add a `Fetch PR diff` step to `reviewer-agent`: run `gh pr diff <PR_NUMBER>`, write the output to `GITHUB_OUTPUT` via a randomly generated (not fixed) heredoc delimiter, following the exact `env:`-then-`"$VAR"` pattern the existing "Build prompt for this trigger" step already uses for attacker-controlled text, in `.github/workflows/claude-dev-agent.yml` (ADR 0005 Decision 2, Consequences — injection-safety requirement)
-- [ ] T009 [US1] Extend `reviewer-agent`'s prompt-building step to embed the fetched diff text into `reviewer`'s prompt (via the `prompt:` `with:`-field YAML substitution, never a `run:` shell splice) and instruct `reviewer` to use `Read`/`Grep`/`Glob` against the checked-out tree only for context beyond the diff, never to attempt re-deriving the diff itself, in `.github/workflows/claude-dev-agent.yml` (ADR 0005 Decision 3)
-- [ ] T010 [US1] Make the `Fetch PR diff` step (T008) fail the job visibly (non-zero exit, no fallback) if the diff fetch fails or returns empty, per FR-013 and ADR 0005 Consequences, in `.github/workflows/claude-dev-agent.yml`
+- [ ] T106 [US1] Replace `reviewer-agent`'s `if: false` placeholder (T103) with the real trigger condition: `on: pull_request: types: [opened, synchronize]`, scoped by `if: github.event.sender.login == '<bot login from T102>' && github.event.sender.type == 'Bot'` in `.github/workflows/claude-dev-agent.yml` (ADR 0009, FR-007's actor-identification principle applied to `sender`)
+- [ ] T107 [US1] Add a `Checkout PR head` step to `reviewer-agent`, checking out `github.event.pull_request.head.sha` (not `main`, not a bare default-branch checkout) in `.github/workflows/claude-dev-agent.yml` (ADR 0005 Decision 1)
+- [ ] T108 [US1] Add a `Fetch PR diff` step to `reviewer-agent`: run `gh pr diff <PR_NUMBER>`, write the output to `GITHUB_OUTPUT` via a randomly generated (not fixed) heredoc delimiter, following the exact `env:`-then-`"$VAR"` pattern the existing "Build prompt for this trigger" step already uses for attacker-controlled text, in `.github/workflows/claude-dev-agent.yml` (ADR 0005 Decision 2, Consequences — injection-safety requirement)
+- [ ] T109 [US1] Extend `reviewer-agent`'s prompt-building step to embed the fetched diff text into `reviewer`'s prompt (via the `prompt:` `with:`-field YAML substitution, never a `run:` shell splice) and instruct `reviewer` to use `Read`/`Grep`/`Glob` against the checked-out tree only for context beyond the diff, never to attempt re-deriving the diff itself, in `.github/workflows/claude-dev-agent.yml` (ADR 0005 Decision 3)
+- [ ] T110 [US1] Make the `Fetch PR diff` step (T108) fail the job visibly (non-zero exit, no fallback) if the diff fetch fails or returns empty, per FR-013 and ADR 0005 Consequences, in `.github/workflows/claude-dev-agent.yml`
 
 **Checkpoint**: `reviewer-agent` fires correctly and can see real PR content — safe to smoke-test in isolation before adding verdict-posting
 
@@ -68,15 +68,15 @@ description: "Task list template for feature implementation"
 
 **Goal**: `reviewer-agent`'s output becomes a real, correctly-attributed GitHub PR review.
 
-**Independent Test**: On the same throwaway PR from Phase 3, confirm `reviewer-agent` posts an actual `gh pr review` (approve or request-changes, matching `reviewer`'s actual verdict) authenticated as the automation's own bot identity — verify via `gh pr view <PR> --json reviews` showing `user.login`/`user.type` matching T002's confirmed identity, not a human account and not the default `github-actions[bot]` (quickstart.md Scenario 1 continued; Scenario 5's no-auto-merge guarantee also applies from here on).
+**Independent Test**: On the same throwaway PR from Phase 3, confirm `reviewer-agent` posts an actual `gh pr review` (approve or request-changes, matching `reviewer`'s actual verdict) authenticated as the automation's own bot identity — verify via `gh pr view <PR> --json reviews` showing `user.login`/`user.type` matching T102's confirmed identity, not a human account and not the default `github-actions[bot]` (quickstart.md Scenario 1 continued; Scenario 5's no-auto-merge guarantee also applies from here on).
 
 ### Implementation for US2
 
-- [ ] T011 [US2] Add the required `VERDICT: APPROVE` / `VERDICT: REQUEST_CHANGES` machine-readable first-line instruction to `reviewer-agent`'s prompt-building step (not to `.claude/agents/reviewer.md` itself, preserving FR-012) in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Decision, bullet 1)
-- [ ] T012 [US2] Add a step obtaining the non-default GitHub identity needed to post the review — reuse whichever mechanism `claude-code-action` exposes for a subsequent plain `gh` step to authenticate as the same Claude GitHub App identity `dev-agent` already uses (confirm this reuse path exists first; if it does not, fall back to `actions/create-github-app-token` with dedicated credentials, and flag this back to the project owner as new Manual Setup beyond spec.md's original scope per ADR 0007 Consequences) in `.github/workflows/claude-dev-agent.yml` (ADR 0007 Decision 1)
-- [ ] T013 [US2] Add a step that captures `claude-code-action`'s final response text as a step output (confirm the exact output field against the action's actual documented outputs — this is explicitly unconfirmed per ADR 0006 Consequences, do not assume a field name without checking), parses its first line, and dispatches to `gh pr review <PR_NUMBER> --approve` or `--request-changes --body-file <file>` (body written via a temp file, never `--body` directly, per ADR 0006 Decision bullet 3) using the identity from T012, in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Decision bullet 2)
-- [ ] T014 [US2] Make the verdict-dispatch step (T013) fail the job visibly per FR-013 if the first line matches neither literal verdict string exactly — no default-to-approve or default-to-request-changes fallback in either direction, in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Decision bullet 2, Consequences)
-- [ ] T015 [US2] Before posting (T013), re-check `github.event.pull_request.head.sha` against the SHA the diff was fetched against in T008 and abort visibly (FR-013) if they no longer match, rather than posting a review that silently appears to cover a commit it never actually reviewed, in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Consequences)
+- [ ] T111 [US2] Add the required `VERDICT: APPROVE` / `VERDICT: REQUEST_CHANGES` machine-readable first-line instruction to `reviewer-agent`'s prompt-building step (not to `.claude/agents/reviewer.md` itself, preserving FR-012) in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Decision, bullet 1)
+- [ ] T112 [US2] Add a step obtaining the non-default GitHub identity needed to post the review — reuse whichever mechanism `claude-code-action` exposes for a subsequent plain `gh` step to authenticate as the same Claude GitHub App identity `dev-agent` already uses (confirm this reuse path exists first; if it does not, fall back to `actions/create-github-app-token` with dedicated credentials, and flag this back to the project owner as new Manual Setup beyond spec.md's original scope per ADR 0007 Consequences) in `.github/workflows/claude-dev-agent.yml` (ADR 0007 Decision 1)
+- [ ] T113 [US2] Add a step that captures `claude-code-action`'s final response text as a step output (confirm the exact output field against the action's actual documented outputs — this is explicitly unconfirmed per ADR 0006 Consequences, do not assume a field name without checking), parses its first line, and dispatches to `gh pr review <PR_NUMBER> --approve` or `--request-changes --body-file <file>` (body written via a temp file, never `--body` directly, per ADR 0006 Decision bullet 3) using the identity from T112, in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Decision bullet 2)
+- [ ] T114 [US2] Make the verdict-dispatch step (T113) fail the job visibly per FR-013 if the first line matches neither literal verdict string exactly — no default-to-approve or default-to-request-changes fallback in either direction, in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Decision bullet 2, Consequences)
+- [ ] T115 [US2] Before posting (T113), re-check `github.event.pull_request.head.sha` against the SHA the diff was fetched against in T108 and abort visibly (FR-013) if they no longer match, rather than posting a review that silently appears to cover a commit it never actually reviewed, in `.github/workflows/claude-dev-agent.yml` (ADR 0006 Consequences)
 
 **Checkpoint**: `reviewer-agent` produces a real, correctly-attributed review end to end — Phase 3+4 together satisfy SC-002's tool-restriction smoke test prerequisite once run against a throwaway PR
 
@@ -90,10 +90,10 @@ description: "Task list template for feature implementation"
 
 ### Implementation for US3
 
-- [ ] T016 [US3] Replace `qa-agent`'s `if: false` placeholder (T004) with the real trigger condition: `on: pull_request_review: types: [submitted]`, `if: github.event.review.state == 'approved' && github.event.review.commit_id == github.event.pull_request.head.sha && github.event.review.user.login == '<bot login from T002/T012>' && github.event.review.user.type == 'Bot'` in `.github/workflows/claude-dev-agent.yml` (ADR 0009 Decision, `qa-agent`'s trigger; data-model.md `PRReviewEvent` validation rule)
-- [ ] T017 [US3] Add a `Checkout PR branch` step to `qa-agent` (the PR's own branch, needed since `qa` must commit its report there) in `.github/workflows/claude-dev-agent.yml` (FR-006, mirrors `qa.md`'s existing documented one-PR-per-task convention)
-- [ ] T018 [US3] Wire `qa-agent`'s `claude-code-action` invocation with the automation-mode prompt instructing `qa` to validate per its existing responsibilities and commit a `docs/validation/*.md` report onto the checked-out branch, in `.github/workflows/claude-dev-agent.yml` (FR-005, FR-012 — `qa.md` itself unchanged)
-- [ ] T019 [US3] Make `qa-agent` fail visibly (FR-013) if the target branch/PR no longer exists or is already merged by the time it runs, rather than silently opening a new branch/PR to route around it, in `.github/workflows/claude-dev-agent.yml` (FR-006, Constitution Principle IV/V)
+- [ ] T116 [US3] Replace `qa-agent`'s `if: false` placeholder (T104) with the real trigger condition: `on: pull_request_review: types: [submitted]`, `if: github.event.review.state == 'approved' && github.event.review.commit_id == github.event.pull_request.head.sha && github.event.review.user.login == '<bot login from T102/T112>' && github.event.review.user.type == 'Bot'` in `.github/workflows/claude-dev-agent.yml` (ADR 0009 Decision, `qa-agent`'s trigger; data-model.md `PRReviewEvent` validation rule)
+- [ ] T117 [US3] Add a `Checkout PR branch` step to `qa-agent` (the PR's own branch, needed since `qa` must commit its report there) in `.github/workflows/claude-dev-agent.yml` (FR-006, mirrors `qa.md`'s existing documented one-PR-per-task convention)
+- [ ] T118 [US3] Wire `qa-agent`'s `claude-code-action` invocation with the automation-mode prompt instructing `qa` to validate per its existing responsibilities and commit a `docs/validation/*.md` report onto the checked-out branch, in `.github/workflows/claude-dev-agent.yml` (FR-005, FR-012 — `qa.md` itself unchanged)
+- [ ] T119 [US3] Make `qa-agent` fail visibly (FR-013) if the target branch/PR no longer exists or is already merged by the time it runs, rather than silently opening a new branch/PR to route around it, in `.github/workflows/claude-dev-agent.yml` (FR-006, Constitution Principle IV/V)
 
 **Checkpoint**: Full `developer → reviewer → qa` lifecycle runs unattended on a throwaway PR — this is quickstart.md Scenario 2's complete happy path
 
@@ -107,8 +107,8 @@ description: "Task list template for feature implementation"
 
 ### Implementation for US4
 
-- [ ] T020 [US4] Confirm (by reading, not by adding new code) that no step added in Phases 2–5 contains a `gh pr merge` call or equivalent under any condition, across `.github/workflows/claude-dev-agent.yml` — this is a verification task, not an implementation task; if one is found, remove it (FR-011)
-- [ ] T021 [US4] Confirm the existing round-cap "Stop and hand back" step's condition still correctly gates `dev-agent`'s dispatch at the new cap value of 5 (T005) and that reaching it produces a visible failure/comment per FR-013, in `.github/workflows/claude-dev-agent.yml`
+- [ ] T120 [US4] Confirm (by reading, not by adding new code) that no step added in Phases 2–5 contains a `gh pr merge` call or equivalent under any condition, across `.github/workflows/claude-dev-agent.yml` — this is a verification task, not an implementation task; if one is found, remove it (FR-011)
+- [ ] T121 [US4] Confirm the existing round-cap "Stop and hand back" step's condition still correctly gates `dev-agent`'s dispatch at the new cap value of 5 (T105) and that reaching it produces a visible failure/comment per FR-013, in `.github/workflows/claude-dev-agent.yml`
 
 **Checkpoint**: Safety guarantees hold under the fully automated loop, not just the happy path
 
@@ -122,13 +122,13 @@ description: "Task list template for feature implementation"
 
 ### Implementation for US5
 
-- [ ] T022 [US5] Run quickstart.md Scenario 1 (tool-restriction smoke test) against a throwaway PR and record the literal result (`permission_denials_count` and/or explicit tool-denial text) in `docs/validation/002-smoke-test.md` — do not proceed to T023 until this passes (FR-002, SC-002)
-- [ ] T023 [US5] Run quickstart.md Scenario 2 (full lifecycle) against a throwaway issue end-to-end and record the observed run sequence, review objects, and validation-report commit in `docs/validation/002-smoke-test.md` (FR-009, SC-001)
-- [ ] T024 [P] [US5] Run quickstart.md Scenario 3 (stale-approval rejection) against a throwaway PR and record the result in `docs/validation/002-smoke-test.md` (FR-007 verification)
-- [ ] T025 [P] [US5] Record `ANTHROPIC_API_KEY_REVIEWER`/`ANTHROPIC_API_KEY_QA`'s actual per-key usage and the workflow run's actual wall-clock duration from T023's run in `docs/validation/002-smoke-test.md`, per FR-009's "measure, don't estimate" requirement (SC-003)
-- [ ] T026 [US5] Present T022–T025's recorded results to the project owner and record their explicit accept/reject decision (and any conditions) in `docs/validation/002-smoke-test.md` before this feature is enabled for real, non-throwaway `claude-dev`-labeled issues by default (SC-003)
+- [ ] T122 [US5] Run quickstart.md Scenario 1 (tool-restriction smoke test) against a throwaway PR and record the literal result (`permission_denials_count` and/or explicit tool-denial text) in `docs/validation/002-smoke-test.md` — do not proceed to T123 until this passes (FR-002, SC-002)
+- [ ] T123 [US5] Run quickstart.md Scenario 2 (full lifecycle) against a throwaway issue end-to-end and record the observed run sequence, review objects, and validation-report commit in `docs/validation/002-smoke-test.md` (FR-009, SC-001)
+- [ ] T124 [P] [US5] Run quickstart.md Scenario 3 (stale-approval rejection) against a throwaway PR and record the result in `docs/validation/002-smoke-test.md` (FR-007 verification)
+- [ ] T125 [P] [US5] Record `ANTHROPIC_API_KEY_REVIEWER`/`ANTHROPIC_API_KEY_QA`'s actual per-key usage and the workflow run's actual wall-clock duration from T123's run in `docs/validation/002-smoke-test.md`, per FR-009's "measure, don't estimate" requirement (SC-003)
+- [ ] T126 [US5] Present T122–T125's recorded results to the project owner and record their explicit accept/reject decision (and any conditions) in `docs/validation/002-smoke-test.md` before this feature is enabled for real, non-throwaway `claude-dev`-labeled issues by default (SC-003)
 
-**Checkpoint**: All success criteria (SC-001 through SC-005) have recorded evidence — this feature is ready for real use once T026's decision is "accept"
+**Checkpoint**: All success criteria (SC-001 through SC-005) have recorded evidence — this feature is ready for real use once T126's decision is "accept"
 
 ---
 
@@ -136,9 +136,9 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Documentation and header-comment updates reflecting the now-implemented feature — safe to do in parallel with each other since they touch different files.
 
-- [ ] T027 [P] Update `.github/workflows/claude-dev-agent.yml`'s own header comment to describe the three-job structure and both new trigger paths, mirroring how it already documents the two `dev-agent` triggers (ADR 0009)
-- [ ] T028 [P] Update `CLAUDE.md`'s Subagents section to remove or qualify the "reviewer and qa are deliberately manually-invoked local sessions" statement, since it is no longer true once this feature is enabled (Constitution Principle II/IV context)
-- [ ] T029 [P] Update `docs/adr/0005`–`0009`'s Consequences sections with the actual confirmed facts from Phase 7's smoke test (bot login string, `claude-code-action` output field name, whether the default-token cascading concern was confirmed or refuted) — these ADRs currently flag several facts as unconfirmed-pending-smoke-test; close that loop once real data exists
+- [ ] T127 [P] Update `.github/workflows/claude-dev-agent.yml`'s own header comment to describe the three-job structure and both new trigger paths, mirroring how it already documents the two `dev-agent` triggers (ADR 0009)
+- [ ] T128 [P] Update `CLAUDE.md`'s Subagents section to remove or qualify the "reviewer and qa are deliberately manually-invoked local sessions" statement, since it is no longer true once this feature is enabled (Constitution Principle II/IV context)
+- [ ] T129 [P] Update `docs/adr/0005`–`0009`'s Consequences sections with the actual confirmed facts from Phase 7's smoke test (bot login string, `claude-code-action` output field name, whether the default-token cascading concern was confirmed or refuted) — these ADRs currently flag several facts as unconfirmed-pending-smoke-test; close that loop once real data exists
 
 ---
 
@@ -147,13 +147,13 @@ description: "Task list template for feature implementation"
 ### Phase Dependencies
 
 - **Setup (Phase 1)**: No dependencies — can start immediately.
-- **Foundational (Phase 2)**: Depends on Phase 1 (T002's confirmed bot identity is referenced by Phase 2's job skeletons' eventual trigger conditions, though the skeletons themselves in T003/T004 can be written before T002 finishes, since their triggers start as `if: false` placeholders). BLOCKS all later phases — both new jobs must exist before any trigger wiring is added to them.
-- **US1 (Phase 3)**: Depends on Phase 2 (T003 in particular). No dependency on US2–US5.
+- **Foundational (Phase 2)**: Depends on Phase 1 (T102's confirmed bot identity is referenced by Phase 2's job skeletons' eventual trigger conditions, though the skeletons themselves in T103/T104 can be written before T102 finishes, since their triggers start as `if: false` placeholders). BLOCKS all later phases — both new jobs must exist before any trigger wiring is added to them.
+- **US1 (Phase 3)**: Depends on Phase 2 (T103 in particular). No dependency on US2–US5.
 - **US2 (Phase 4)**: Depends on US1 (needs `reviewer-agent` actually dispatching and seeing a diff before its verdict can be posted).
 - **US3 (Phase 5)**: Depends on US2 (the `approved` trigger it wires up doesn't exist meaningfully until `reviewer-agent` can actually post an APPROVE).
-- **US4 (Phase 6)**: Depends on Phase 2 (T005) and can be verified once US1–US3 exist, but T020/T021 are pure verification and can technically run any time after Phase 2.
+- **US4 (Phase 6)**: Depends on Phase 2 (T105) and can be verified once US1–US3 exist, but T120/T121 are pure verification and can technically run any time after Phase 2.
 - **US5 (Phase 7)**: Depends on US1–US4 all being complete — it smoke-tests the whole assembled feature.
-- **Polish (Phase 8)**: Depends on Phase 7 (T029 specifically needs Phase 7's confirmed facts).
+- **Polish (Phase 8)**: Depends on Phase 7 (T129 specifically needs Phase 7's confirmed facts).
 
 ### Within Each Phase
 
@@ -162,9 +162,9 @@ Tasks within Phases 2–7 are listed in the order they must be applied to the sa
 ### Parallel Opportunities
 
 Genuinely limited by this feature's single-file nature:
-- T001 and T002 (Phase 1) can run in parallel — different concerns, no shared file edit.
-- T024 and T025 (Phase 7) can run in parallel — independent verification/recording tasks against the same completed run, not sequential edits.
-- All of Phase 8 (T027–T029) can run in parallel — three different files.
+- T101 and T102 (Phase 1) can run in parallel — different concerns, no shared file edit.
+- T124 and T125 (Phase 7) can run in parallel — independent verification/recording tasks against the same completed run, not sequential edits.
+- All of Phase 8 (T127–T129) can run in parallel — three different files.
 
 ---
 
@@ -172,7 +172,7 @@ Genuinely limited by this feature's single-file nature:
 
 ### Smallest safely-mergeable increment
 
-Phase 1 + Phase 2 alone (T001–T005) can merge with zero behavior change (`if: false` placeholders) and are a safe, independently reviewable first PR — establishing the new jobs' isolated tool/secret grants (the FR-002/FR-005/FR-008/FR-012 guarantees) before any trigger logic exists to exercise them.
+Phase 1 + Phase 2 alone (T101–T105) can merge with zero behavior change (`if: false` placeholders) and are a safe, independently reviewable first PR — establishing the new jobs' isolated tool/secret grants (the FR-002/FR-005/FR-008/FR-012 guarantees) before any trigger logic exists to exercise them.
 
 ### Incremental delivery
 
