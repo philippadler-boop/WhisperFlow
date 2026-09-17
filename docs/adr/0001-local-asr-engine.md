@@ -1,7 +1,12 @@
 # 0001: Local ASR Engine
 
-> **Status**: Proposed — pending human approval at the Design Gate
-> (Principle II). Not yet binding until sign-off.
+> **Status**: Accepted — approved at the Design Gate (Principle II).
+> Feature 001 (video-subtitle-generator) predates the branch-per-planning-
+> phase process (Constitution Principle IV's documented one-time
+> exception); this ADR was committed directly to `main` on 2026-09-04 as
+> part of that grandfathered flow, and its decision was implicitly
+> ratified by the feature's full implementation and release (T001-T029,
+> all merged).
 
 ## Context
 

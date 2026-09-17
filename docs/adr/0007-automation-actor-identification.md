@@ -1,7 +1,13 @@
 # 0007: Distinguishing Automated `reviewer`'s APPROVE from a Human's Manual Approval
 
-> **Status**: Proposed — pending human approval at the Design Gate
-> (Principle II). Not yet binding until sign-off.
+> **Status**: Accepted — approved at the Design Gate (Principle II) on
+> 2026-09-17. Merging PR #133 was the approval action, per Constitution
+> Principle IV ("It merges to `main` via PR once the plan is approved —
+> that merge is the approval action"). The token/actor-identity and
+> `claude-code-action` output-extraction facts this ADR flags as
+> unconfirmed still require an invocation-based smoke test before real
+> use (Constitution Principle V) — Design Gate approval accepts the
+> *design*, not a claim that those facts are already verified.
 
 ## Context
 
