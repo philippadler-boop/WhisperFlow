@@ -73,21 +73,20 @@ whisperflow transcribe .\samples\hello.mp4 `
 
 ### Choose a transcription model
 
-The default model is `tiny`. Smaller models are faster; larger models can be
+The default model is `base`. Smaller models are faster; larger models can be
 more accurate and require more resources:
 
 ```powershell
-whisperflow transcribe .\samples\hello.mp4 --model base --no-review
+whisperflow transcribe .\samples\hello.mp4 --model tiny --no-review
 ```
 
-Available models are `tiny`, `base`, `small`, `medium`, and `large`.
-`tiny` is the default because benchmarking (see
+Available models are `tiny`, `base`, `small`, `medium`, and `large`. On
+constrained or CPU-only hardware (e.g. a CI runner, or a laptop with no
+GPU and limited CPU headroom), consider `--model tiny` if `base` doesn't
+keep up with the SC-002/SC-006 processing-time target — see
 [Benchmarking](#benchmarking) below and
 `specs/001-video-subtitle-generator/contracts/cli.md`'s minimum-hardware
-note) found larger sizes can miss the SC-002/SC-006 processing-time target
-on CPU-only hardware with no GPU. If you have a GPU or have benchmarked
-your own hardware and confirmed it keeps up, a larger `--model` gives more
-accurate transcripts.
+note for the evidence behind this recommendation.
 
 ### Review mode
 
@@ -155,7 +154,7 @@ Options:
 | Option | Default | Description |
 |---|---|---|
 | `--output`, `-o PATH` | `<video_basename>.srt` next to the input video | Where to write the `.srt` file |
-| `--model {tiny,base,small,medium,large}` | `tiny` | faster-whisper model size — smaller is faster, larger is more accurate; `tiny` is the default to reliably meet the SC-002/SC-006 timing target on CPU-only hardware (see contracts/cli.md's minimum-hardware note) |
+| `--model {tiny,base,small,medium,large}` | `base` | faster-whisper model size — smaller is faster, larger is more accurate; consider `--model tiny` on constrained/CPU-only hardware (see contracts/cli.md's minimum-hardware note) |
 | `--review` / `--no-review` | `--review` | With `--review`, opens the draft `.srt` in an editor and waits for confirmation before finalizing; `--no-review` finalizes immediately |
 | `--editor CMD` | `$EDITOR`/`$VISUAL`, else a built-in fallback prompt | Overrides which editor `--review` opens |
 
@@ -168,9 +167,9 @@ whisperflow transcribe .\samples\hello.mp4 --no-review
 # Custom output path
 whisperflow transcribe .\samples\hello.mp4 -o .\output\hello.srt --no-review
 
-# Larger/more accurate model (only if your hardware keeps up -- see
-# contracts/cli.md's minimum-hardware note)
-whisperflow transcribe .\samples\hello.mp4 --model base --no-review
+# Smaller/faster model (recommended on constrained/CPU-only hardware --
+# see contracts/cli.md's minimum-hardware note)
+whisperflow transcribe .\samples\hello.mp4 --model tiny --no-review
 
 # Review with an explicit, blocking editor
 whisperflow transcribe .\samples\hello.mp4 --editor "code --wait"
@@ -230,12 +229,13 @@ user, a viewer) in spec.md, so this script gives `qa` a concrete,
 reproducible number to anchor that judgment against, not a replacement
 for it.
 
-`scripts/benchmark.py time` runs against CPU-only reference hardware were
-also what motivated `tiny` as the CLI's default `--model` size (T029) --
+`scripts/benchmark.py time` runs on CPU-only reference hardware are what
+back `--model tiny`'s recommendation for constrained hardware (T029) --
 see `specs/001-video-subtitle-generator/contracts/cli.md`'s
-minimum-hardware note for the measured numbers behind that decision, and
-run the benchmark yourself against your own hardware before choosing a
-larger model for a time-sensitive workflow.
+minimum-hardware note for the measured numbers and open questions behind
+that recommendation, and run the benchmark yourself against a
+representative, realistically long video on your own hardware before
+choosing a model size for a time-sensitive workflow.
 
 ## Windows Installer Build
 

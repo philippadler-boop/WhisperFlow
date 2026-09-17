@@ -130,7 +130,7 @@ def test_output_defaults_to_video_basename_next_to_input(
     assert captured_pipeline_call["output_path"] == Path("some/dir/video.srt")
 
 
-# | `--model {tiny,base,small,medium,large}` | `tiny` | faster-whisper
+# | `--model {tiny,base,small,medium,large}` | `base` | faster-whisper
 # model size ... |
 
 
@@ -143,7 +143,7 @@ def test_help_documents_model_option_choices_and_default(cli_runner: CliRunner) 
         "faster-whisper model size — smaller is faster, larger is more accurate "
         "(research.md)." in output
     )
-    assert "[default: tiny]" in output
+    assert "[default: base]" in output
 
 
 def test_model_option_accepts_all_contract_sizes(
@@ -160,16 +160,19 @@ def test_model_option_rejects_choice_outside_contract_set(cli_runner: CliRunner)
     assert result.exit_code != 0
 
 
-def test_default_model_is_tiny(
+def test_default_model_is_base(
     cli_runner: CliRunner, captured_pipeline_call: dict[str, Any]
 ) -> None:
-    """T029: default changed from `base` to `tiny` (contracts/cli.md's
-    minimum-hardware note) after benchmarking found `base` misses the
-    SC-002/SC-006 timing target on CPU-only reference hardware.
+    """T029 investigated changing this default after short-clip
+    benchmarking looked borderline on CPU-only reference hardware, but
+    that evidence conflicted with a real, much-longer benchmark run and
+    left SC-003's accuracy cost unmeasured -- see contracts/cli.md's
+    minimum-hardware note. `base` remains the default; `tiny` is
+    recommended only for constrained/CPU-only hardware.
     """
     result = cli_runner.invoke(app, ["transcribe", "video.mp4"])
     assert result.exit_code == 0
-    assert captured_pipeline_call["model"] == ModelSize.TINY
+    assert captured_pipeline_call["model"] == ModelSize.BASE
 
 
 # | `--review / --no-review` | `--review` | With `--review`, ... |

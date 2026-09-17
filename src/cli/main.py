@@ -176,17 +176,16 @@ def transcribe(
         ),
     ),
     model: ModelSize = typer.Option(
-        ModelSize.TINY,
+        ModelSize.BASE,
         "--model",
         case_sensitive=False,
         help=(
             "faster-whisper model size — smaller is faster, "
-            "larger is more accurate (research.md). Defaults to `tiny`: "
-            "T029's benchmarking (contracts/cli.md's minimum-hardware note) "
-            "found `base` misses the SC-002/SC-006 ~2x-real-time target on "
-            "CPU-only reference hardware, while `tiny` meets it with margin "
-            "to spare. Pick a larger size explicitly if your hardware has "
-            "more headroom (e.g. a GPU) and you want higher accuracy."
+            "larger is more accurate (research.md). On constrained or "
+            "CPU-only hardware (e.g. CI runners), consider `--model tiny` "
+            "if you find `base` doesn't keep up with the SC-002/SC-006 "
+            "timing target — see contracts/cli.md's minimum-hardware note "
+            "(T029)."
         ),
     ),
     review: bool = typer.Option(

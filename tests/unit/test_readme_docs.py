@@ -58,7 +58,7 @@ def test_readme_documents_model_option_and_all_contract_sizes():
     for size in ("tiny", "base", "small", "medium", "large"):
         assert size in text
     assert (
-        "| `--model {tiny,base,small,medium,large}` | `tiny` |" in text
+        "| `--model {tiny,base,small,medium,large}` | `base` |" in text
     )
 
 
@@ -104,12 +104,13 @@ def test_readme_references_the_cli_contract_doc():
     assert "contracts/cli.md" in text
 
 
-def test_readme_documents_why_tiny_is_the_default_model():
-    """T029: the default `--model` changed from `base` to `tiny` after
-    benchmarking found `base` misses the SC-002/SC-006 timing target on
-    CPU-only reference hardware -- README should explain the rationale
-    and point at contracts/cli.md's minimum-hardware note, not just state
-    the bare default."""
+def test_readme_documents_when_tiny_is_recommended():
+    """T029 investigated changing the default `--model` after short-clip
+    benchmarking looked borderline on CPU-only reference hardware, but
+    that evidence didn't hold up -- see contracts/cli.md's
+    minimum-hardware note. README should still point readers at `tiny`
+    as a recommendation for constrained/CPU-only hardware, not just state
+    the bare `base` default."""
     text = _read_readme()
     assert "minimum-hardware" in text
     assert "SC-002" in text or "SC-006" in text

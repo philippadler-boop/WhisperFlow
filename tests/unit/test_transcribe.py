@@ -255,10 +255,11 @@ class TestTranscribeAudioMocked:
         assert captured["device"] == DEVICE == "auto"
         assert captured["compute_type"] == COMPUTE_TYPE == "int8"
 
-    def test_default_model_size_is_tiny(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        """T029: default changed from `base` to `tiny` -- benchmarking found
-        `base` misses the SC-002/SC-006 timing target on CPU-only reference
-        hardware (contracts/cli.md's minimum-hardware note).
+    def test_default_model_size_is_base(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        """T029 investigated changing this default; see contracts/cli.md's
+        minimum-hardware note for why `base` remains the default and
+        `tiny` is recommended only for constrained/CPU-only hardware
+        instead.
         """
         captured: dict[str, object] = {}
 
@@ -272,7 +273,7 @@ class TestTranscribeAudioMocked:
 
         transcribe_audio(track)
 
-        assert captured["model_size_or_path"] == "tiny"
+        assert captured["model_size_or_path"] == "base"
 
     def test_model_construction_failure_raises_model_load_error(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
