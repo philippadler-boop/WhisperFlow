@@ -1,14 +1,13 @@
 # Feature Specification: Automate `reviewer` and `qa` via GitHub Actions
 
-**Feature Branch**: `002-reviewer-qa-automation` *(not yet cut — see Process
-Note at the end of this document)*
+**Feature Branch**: `002-reviewer-qa-automation` (PR #133)
 
 **Created**: 2026-09-17
 
-**Status**: Draft — proposal stage, not approved for implementation.
-Every requirement below is a proposal pending human sign-off at the
-Requirements Gate; nothing here authorizes the Architect or Developer to
-proceed.
+**Status**: Requirements Gate approved (2026-09-17) — see "Resolved
+Decisions" below. All five Open Questions have explicit project-owner
+answers; the requirements and success criteria have been updated to
+reflect them. This authorizes the Architect to proceed to Design/Plan.
 
 **Input**: User description: "extend automation to also run `reviewer` and
 `qa` themselves via GitHub Actions... so the whole task lifecycle
@@ -83,55 +82,59 @@ those roles are automated instead.
   restriction, or the "no subagent merges its own work" rule — both are
   documented in CLAUDE.md as load-bearing and out of scope to weaken here.
 - **Not** deciding the concrete mechanism for supplying `reviewer` a PR
-  diff in an Actions context, or the exact automation-mode tool allowlist
-  for `qa`'s Bash access — those are Architect-phase design decisions that
-  depend on requirements this document leaves open (see Open Questions).
+  diff in an Actions context — that remains an Architect-phase design
+  decision (FR-003); the containment/trigger-timing/cap-value questions
+  that used to be open are now resolved (see "Resolved Decisions").
 - **Not** setting a specific cost/latency budget or threshold — the idea
   note explicitly defers this to future scoping, not to a decision made in
   this spec.
 - **Not** automating `analyst` or `architect`; this proposal is scoped to
   `reviewer` and `qa` only, matching the idea note.
 
-## Open Questions / [NEEDS CLARIFICATION]
+## Resolved Decisions (Requirements Gate — approved 2026-09-17)
 
-These are carried forward from `docs/ideas/reviewer-qa-automation.md`
-because they are genuinely open tradeoffs for the project owner to decide,
-not implementation details the Architect can resolve unilaterally. Several
-of the requirements below are intentionally written as constraints that
-hold *regardless* of how these are answered, rather than presupposing an
-answer.
+The five Open Questions below were put to the project owner directly and
+each has an explicit answer. This section is kept as a permanent record of
+what was asked and decided, rather than deleted, so the reasoning survives
+even after the requirements below are updated to match.
 
-1. **[NEEDS CLARIFICATION — safety-property replacement]** What replaces
-   the human-in-the-loop gate that manual `reviewer` invocation currently
-   provides? Candidates include: relying solely on the existing human
-   merge gate (already a hard rule); adding a new explicit gate (e.g. a
-   required human "approved for automation" signal per PR or per repo);
-   or something else. Not deciding this and shipping automated `reviewer`
-   anyway would silently remove a documented safety property.
-2. **[NEEDS CLARIFICATION — qa Bash containment]** Is CI's existing
-   `ci.yml` `test`-job sandboxing sufficient containment for `qa`'s
-   broader Bash use (installing dependencies, running real
-   transcriptions, sometimes downloading models), or does automated `qa`
-   need a narrower, automation-mode-specific tool allowlist than its
-   current interactive one?
-3. **[NEEDS CLARIFICATION — round-cap correctness under automated review]**
-   Does `MAX_AUTO_FIX_ROUNDS`, as currently computed (counting
-   `CHANGES_REQUESTED` reviews on the PR), still correctly bound a fully
-   automated review→fix loop, or does an automated reviewer posting
-   reviews faster/more reliably than a human require a different
-   mechanism (e.g. a wall-clock cap, or counting automated `qa` commits
-   toward the same cap)?
-4. **[NEEDS CLARIFICATION — qa trigger timing]** If `qa` is triggered
-   automatically, what condition establishes that "review has genuinely
-   settled" before `qa` runs — e.g. does the workflow need to wait for "a
-   review cycle produced zero new commits for one full round," or some
-   other condition? (This directly guards the concern already on record as
-   bugs.md item #3: qa running before review has actually settled.)
-5. **[NEEDS CLARIFICATION — cost/latency budget]** What is the actual
-   per-task increase in agent API spend and turnaround time from adding
-   two more automated invocations (reviewer, qa) per fix round, and is
-   that increase acceptable? No target or threshold currently exists; this
-   needs real measurement, not an estimate, before a go/no-go decision.
+1. **Safety-property replacement — DECIDED: full automation, no new gate.**
+   The existing Merge/Release human gate is the only safety property that
+   remains. A labeled issue runs the entire `developer → reviewer → qa`
+   cycle unattended, repeating automatically until `reviewer` has no more
+   findings (an APPROVE verdict) and CI is green — a human is not expected
+   to run `reviewer` or `qa` locally, or to approve anything mid-cycle. The
+   human's only remaining checkpoint is the final merge.
+2. **qa Bash containment — DECIDED: reuse existing CI sandboxing.** No new
+   containment mechanism is introduced. Automated `qa` runs with the same
+   GitHub Actions runner isolation `ci.yml`'s `test` job already relies on;
+   its Bash use (installing deps, real transcriptions, model downloads) is
+   treated as equivalent in kind to what `test` already does.
+3. **Round-cap correctness — DECIDED: keep counting reviews, raise the cap
+   to 5.** `MAX_AUTO_FIX_ROUNDS`'s existing mechanism (counting
+   `CHANGES_REQUESTED` reviews on the PR) is kept as-is — a review is a
+   review regardless of who/what posted it. The default cap is raised from
+   3 to **5**, since full automation (decision 1) means more cycles may be
+   needed to reach a clean approve without a human ever intervening
+   mid-loop.
+4. **qa trigger timing — DECIDED: trigger only on an APPROVE verdict.**
+   Automated `qa` is triggered exclusively by automated `reviewer` posting
+   an actual `APPROVE` PR review — never on a `CHANGES_REQUESTED` review,
+   and never on a bare passage of time or commit-quiescence heuristic. This
+   directly resolves the concern on record as bugs.md item #3 / issue #132
+   (qa running before review has actually settled): an APPROVE verdict is
+   an unambiguous signal that no more fix rounds are expected.
+5. **Cost/latency budget — DECIDED: measure via dedicated API keys before
+   enabling for real work.** Rather than reusing `ANTHROPIC_API_KEY_DEV`
+   for the new automated `reviewer`/`qa` invocations, two new dedicated
+   GitHub Actions secrets are provisioned — `ANTHROPIC_API_KEY_REVIEWER`
+   and `ANTHROPIC_API_KEY_QA` — mirroring how `ANTHROPIC_API_KEY_DEV`
+   already isolates `developer`'s spend. This lets actual per-role API cost
+   be measured directly from each key's own usage, not estimated or
+   commingled with `developer`'s spend. See "Manual Setup Required" below
+   — this is a manual, human action (creating Anthropic API keys and
+   registering them as repo secrets), not something the Architect or an
+   agent can provision itself.
 
 ## Requirements
 
@@ -139,11 +142,12 @@ Numbered for independent traceability; each is intended to be specific
 enough for `qa` to check against a running/observable workflow rather than
 by reading source alone.
 
-- **FR-001**: This feature MUST NOT be enabled for real (non-throwaway)
-  issues/PRs until Open Question 1 (safety-property replacement) has an
-  explicit, documented answer approved by the project owner — either "the
-  existing Merge/Release human gate is sufficient" or a specific
-  additional gate, but not left undecided.
+- **FR-001**: Per Resolved Decision 1, no new human-approval gate is
+  introduced by this feature. The existing Merge/Release gate is the sole
+  remaining human checkpoint; a labeled issue's `developer → reviewer →
+  qa` cycle MUST be able to run to completion (an APPROVE verdict and
+  green CI, or exhaustion of the round cap per FR-008) without any human
+  action beyond the final merge decision.
 - **FR-002**: When `reviewer` runs in automation mode, its
   `claude-code-action` invocation MUST grant it no tools beyond its
   documented interactive allowlist (`Read, Grep, Glob` per
@@ -170,10 +174,10 @@ by reading source alone.
   `claude-dev-agent.yml`'s existing `pull_request_review` /
   `changes_requested` trigger continues to fire correctly without
   modification.
-- **FR-005**: When `qa` runs in automation mode, its Bash access MUST be
-  constrained by an explicit, documented containment mechanism (see Open
-  Question 2) rather than silently inheriting its full interactive Bash
-  capability unmodified into a CI runner.
+- **FR-005**: Per Resolved Decision 2, when `qa` runs in automation mode,
+  its Bash access runs under the same GitHub Actions runner isolation
+  `ci.yml`'s `test` job already relies on — no additional, narrower
+  containment mechanism is required beyond that existing sandboxing.
 - **FR-006**: Automated `qa` MUST commit its validation report to the same
   branch as the PR being validated (per the existing one-PR-per-task
   convention in CLAUDE.md and `.claude/agents/qa.md`) and MUST NOT open a
@@ -181,23 +185,27 @@ by reading source alone.
   or is already merged, the workflow MUST fail visibly (e.g. a failed run
   and/or a posted comment) rather than silently opening a new branch/PR to
   route around it.
-- **FR-007**: Automated `qa` MUST NOT be triggered against a PR until the
-  condition established in answer to Open Question 4 (review has
-  genuinely settled) is met. Until that condition is defined and approved,
-  automated `qa` MUST NOT be enabled for real work.
-- **FR-008**: If `reviewer` becomes automated, `MAX_AUTO_FIX_ROUNDS` (or
-  its replacement per Open Question 3) MUST still cap the total number of
-  automatic review→fix cycles on a given PR at a finite, configurable
-  number, and reaching that cap MUST stop further automatic dispatch and
-  hand back to a human (mirroring `claude-dev-agent.yml`'s existing
-  "Stop and hand back" behavior), regardless of whether the cap's
-  underlying counting mechanism changes.
-- **FR-009**: Before automated `reviewer` and/or `qa` are enabled for real
-  work (as opposed to a throwaway smoke-test issue/PR), this feature MUST
-  produce a documented measurement of the actual per-task increase in API
-  cost and turnaround/latency versus today's developer-only automation
-  (Open Question 5), sufficient for the project owner to make an
-  accept/reject decision on the increase.
+- **FR-007**: Per Resolved Decision 4, automated `qa` MUST be triggered
+  exclusively by automated `reviewer` posting an `APPROVE` PR review for
+  that PR's current commit — never by a `CHANGES_REQUESTED` review, and
+  never by a time-based or commit-quiescence heuristic. If `qa` cannot
+  determine that the most recent review event on the PR was an `APPROVE`
+  matching the current HEAD commit, it MUST NOT run.
+- **FR-008**: Per Resolved Decision 3, `MAX_AUTO_FIX_ROUNDS` keeps its
+  existing counting mechanism (total `CHANGES_REQUESTED` reviews on the
+  PR) and its default value MUST be raised from 3 to **5** as part of this
+  feature. Reaching the cap MUST still stop further automatic dispatch and
+  hand back to a human, mirroring `claude-dev-agent.yml`'s existing "Stop
+  and hand back" behavior.
+- **FR-009**: Per Resolved Decision 5, automated `reviewer` and `qa`
+  invocations MUST authenticate using two new dedicated Anthropic API
+  keys — `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA` —
+  provisioned as GitHub Actions secrets, distinct from
+  `ANTHROPIC_API_KEY_DEV`. Before this feature is enabled for real
+  (non-throwaway) work, at least one full automated cycle MUST be run
+  against a throwaway issue/PR and its per-key API cost and wall-clock
+  turnaround time recorded, so the project owner can make an
+  accept/reject call on the actual, measured increase — not an estimate.
 - **FR-010**: Any new automation-mode workflow (or modification to
   `claude-dev-agent.yml`) introduced by this feature MUST grant tools
   explicitly via `--allowedTools` (or an equivalent `settings.permissions`
@@ -225,6 +233,11 @@ by reading source alone.
   output. (This mirrors the M2/M8 lesson on record: a silently-successful
   run with `permission_denials_count: 20` was only caught because
   `show_full_output` was already enabled for inspection.)
+- **FR-014**: This feature MUST NOT be considered ready for the Architect
+  to design against until the two new API keys in FR-009 have actually
+  been created and registered as repo secrets — see "Manual Setup
+  Required" below. This is a manual, human action outside any agent's
+  tool access.
 
 ## Success Criteria
 
@@ -236,17 +249,17 @@ by reading source alone.
 - **SC-002**: FR-002's tool-restriction smoke test for automated
   `reviewer` passes (zero unexpected tool grants) before automated
   `reviewer` is used on any real work.
-- **SC-003**: FR-009's documented cost/latency measurement exists, and the
-  project owner has made an explicit accept/reject call on the increase,
-  before automated `reviewer`/`qa` is enabled for `claude-dev`-labeled
-  issues by default (as opposed to opt-in smoke testing only).
-- **SC-004**: Reviewing at least one real automated run confirms neither
-  the Requirements/Design gate nor the Merge/Release gate was bypassed or
-  weakened (e.g. no auto-merge occurred; no PR merged without an
-  independent review verdict recorded).
-- **SC-005**: All five Open Questions above have an explicit, recorded
-  answer (not a default/implicit one) before this feature exits the
-  Requirements Gate.
+- **SC-003**: FR-009's throwaway-issue cost/latency measurement (using the
+  dedicated `ANTHROPIC_API_KEY_REVIEWER`/`ANTHROPIC_API_KEY_QA` keys)
+  exists, and the project owner has made an explicit accept/reject call on
+  the measured increase, before automated `reviewer`/`qa` is enabled for
+  `claude-dev`-labeled issues by default.
+- **SC-004**: Reviewing at least one real automated run confirms the
+  Merge/Release gate was not bypassed or weakened (no auto-merge occurred;
+  no PR merged without an independent, automated APPROVE review recorded
+  from `reviewer` and a validation report recorded from `qa`).
+- **SC-005**: ~~All five Open Questions above have an explicit, recorded
+  answer~~ — **met 2026-09-17**; see "Resolved Decisions" above.
 
 ## Assumptions
 
@@ -258,19 +271,39 @@ by reading source alone.
 - "Automated" here means GitHub-Actions-triggered, unattended execution of
   the existing `reviewer`/`qa` subagent definitions (`.claude/agents/`) —
   not a rewrite of their responsibilities or prompts.
-- The idea note's five open-question categories are treated as an
-  exhaustive starting list for this spec's Open Questions, but the
-  Architect or a later Analyst pass may surface additional ones once a
-  concrete design is attempted.
+- The idea note's five open-question categories were treated as an
+  exhaustive starting list for this spec's now-resolved decisions, but the
+  Architect or a later Analyst pass may surface additional open questions
+  once a concrete design is attempted.
 
-## Process Note (not a requirement — procedural, for whoever picks this up)
+## Manual Setup Required (not automatable — see FR-009/FR-014)
+
+Before the Architect can treat this feature as buildable, the project
+owner must:
+
+1. Create two new Anthropic API keys, dedicated to this feature and
+   distinct from the existing `developer` key — one for `reviewer`, one
+   for `qa`.
+2. Register them as GitHub Actions repo secrets named
+   `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA`, mirroring how
+   `ANTHROPIC_API_KEY_DEV` is already configured for `developer` in
+   `claude-dev-agent.yml`.
+
+This is a manual, human action — no agent in this pipeline (analyst,
+architect, developer, reviewer, qa) has the access needed to create
+Anthropic API keys or GitHub repo secrets itself. Until both secrets
+exist, the Architect's design can proceed on paper, but no automated
+`reviewer`/`qa` workflow can actually be exercised, even as a throwaway
+smoke test.
+
+## Process Note (not a requirement — procedural, historical record)
 
 Per `CLAUDE.md`'s Working Conventions, Spec Kit planning phases (including
-this Analyst pass) are expected to happen on a real feature branch, merged
-via PR at Design Gate approval — not authored directly on `main`. This
-document was authored by the `analyst` subagent, which has no git/Bash
-tools and cannot cut a branch or commit itself; whoever takes this spec
-forward (moves it toward Architect/Design) is responsible for putting it
-on a `002-reviewer-qa-automation` branch and opening a PR, consistent with
-how `001-video-subtitle-generator` is documented as a one-time exception
-and every feature after it is not.
+this Analyst pass) happen on a real feature branch, merged via PR at
+Design Gate approval — not authored directly on `main`. This document was
+originally authored by the `analyst` subagent, which has no git/Bash
+tools and could not cut a branch or commit itself; the orchestrating
+session subsequently created the `002-reviewer-qa-automation` branch,
+committed this document, and opened PR #133, consistent with how
+`001-video-subtitle-generator` is documented as a one-time exception and
+every feature after it is not.
