@@ -37,8 +37,11 @@ from audio.extract import AudioTrack
 from audio.video_probe import Video
 from lib.errors import ModelLoadError, TranscriptionError
 
-#: Default `faster-whisper` model size (contracts/cli.md's `--model` default).
-DEFAULT_MODEL_SIZE = "base"
+#: Default `faster-whisper` model size (contracts/cli.md's `--model` default;
+#: `tiny` since T029 -- benchmarking found `base` misses the SC-002/SC-006
+#: ~2x-real-time target on CPU-only reference hardware, see contracts/cli.md's
+#: minimum-hardware note).
+DEFAULT_MODEL_SIZE = "tiny"
 
 #: `device="auto"` lets CTranslate2 pick a GPU automatically when one is
 #: available; `compute_type="int8"` is the CPU-quantization default --

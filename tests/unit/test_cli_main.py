@@ -73,12 +73,16 @@ def test_video_path_argument_is_required(cli_runner: CliRunner) -> None:
     assert "Missing argument" in result.output or "Error" in result.output
 
 
-def test_default_model_is_base(
+def test_default_model_is_tiny(
     cli_runner: CliRunner, captured_pipeline_call: dict[str, Any]
 ) -> None:
+    """T029: default changed from `base` to `tiny` after benchmarking found
+    `base` misses the SC-002/SC-006 timing target on CPU-only reference
+    hardware (contracts/cli.md's minimum-hardware note).
+    """
     result = cli_runner.invoke(app, ["transcribe", "video.mp4"])
     assert result.exit_code == 0
-    assert captured_pipeline_call["model"] == ModelSize.BASE
+    assert captured_pipeline_call["model"] == ModelSize.TINY
 
 
 def test_model_option_accepts_all_contract_sizes(

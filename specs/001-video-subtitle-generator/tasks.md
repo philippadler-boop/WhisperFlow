@@ -95,7 +95,7 @@ description: "Task list template for feature implementation"
 - [x] T026 [P] Integration test confirming no outbound network calls occur during `transcribe` (quickstart.md Scenario 7) in `tests/integration/test_no_network.py`
 - [x] T027 [P] Lint/type-check cleanup pass across `src/` and `tests/` (`ruff check --fix`)
 - [x] T028 Extend the benchmark helper (depends on T025, same file) to measure transcription accuracy and subtitle-sync percentage against a small labeled sample corpus, giving QA concrete data points for SC-003 (≥90% accuracy) and SC-004 (≥95% sync) in `scripts/benchmark.py`
-- [ ] T029 If T025/T028's benchmark shows the SC-002/SC-006 timing target is missed on reference hardware, adjust the default `--model` size (or document a minimum-hardware note) in `src/cli/main.py` and `contracts/cli.md`
+- [x] T029 If T025/T028's benchmark shows the SC-002/SC-006 timing target is missed on reference hardware, adjust the default `--model` size (or document a minimum-hardware note) in `src/cli/main.py` and `contracts/cli.md`
 
 ---
 
