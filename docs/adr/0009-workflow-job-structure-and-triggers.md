@@ -10,7 +10,7 @@
 ## Context
 
 `plan.md`'s Structure Decision fixes that this feature extends the single
-existing `.github/workflows/claude-dev-agent.yml` file rather than adding
+existing `.github/workflows/claude-agents-pipeline.yml` file rather than adding
 a new workflow file. Within that constraint, this ADR decides how the two
 new automation-mode invocations (`reviewer`, `qa`) are wired structurally
 — new jobs vs. new steps in the existing `dev-agent` job — and how the new
@@ -28,7 +28,7 @@ after `developer` opens a brand-new PR from the `issues`/`labeled` path —
 doesn't name an event for it. Resolving this gap is part of this ADR's
 scope, since it directly determines the job graph.
 
-Two relevant facts from `claude-dev-agent.yml`'s own existing rationale
+Two relevant facts from `claude-agents-pipeline.yml`'s own existing rationale
 apply here: (1) `developer`'s PR-opening and fix-round pushes are
 authenticated as the Claude GitHub App (via omitting `github_token`)
 specifically so they *do* trigger downstream events (unlike the default
@@ -128,7 +128,7 @@ pushing and then separately blocking a later step.
   "Stop and hand back" step remain exactly where they are today, inside
   `dev-agent`.
 - This is new, unexercised trigger machinery in the same category
-  `claude-dev-agent.yml`'s own header comment already flags for the
+  `claude-agents-pipeline.yml`'s own header comment already flags for the
   existing `changes_requested` path ("UNVERIFIED... smoke-test all of
   this with a throwaway PR... before trusting it on real work"). The full
   three-job chain (PR opened → `reviewer-agent` fires → APPROVE posted →

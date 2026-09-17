@@ -57,7 +57,7 @@ PR opened (developer's automation-mode run)
 ## RoundCounter
 
 The existing count of `CHANGES_REQUESTED` reviews on a PR, computed live
-by `claude-dev-agent.yml`'s existing `gh api` + `jq` query — not a stored
+by `claude-agents-pipeline.yml`'s existing `gh api` + `jq` query — not a stored
 entity, a derived value re-computed on every trigger.
 
 **Fields**: an integer count of `PullRequestReview` objects with
@@ -127,7 +127,7 @@ authenticates its automation-mode invocation.
 | `qa` | `ANTHROPIC_API_KEY_QA` (new) | This feature (FR-009) |
 
 **Validation rule**: each automation-mode `claude-code-action` invocation
-in the extended `claude-dev-agent.yml` MUST reference only its own role's
+in the extended `claude-agents-pipeline.yml` MUST reference only its own role's
 secret — `reviewer`'s job step MUST NOT fall back to
 `ANTHROPIC_API_KEY_DEV` (even accidentally, e.g. via a YAML anchor/default
 that isn't overridden per-job), since that would silently defeat FR-009's

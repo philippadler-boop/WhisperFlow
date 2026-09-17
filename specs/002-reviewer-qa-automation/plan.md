@@ -8,7 +8,7 @@
 
 ## Summary
 
-Extend `.github/workflows/claude-dev-agent.yml`'s existing unattended
+Extend `.github/workflows/claude-agents-pipeline.yml`'s existing unattended
 `developer` automation so that `reviewer` and `qa` also run via GitHub
 Actions instead of as manually-invoked local sessions, closing the loop so
 a `claude-dev`-labeled issue runs `developer → reviewer → (fix rounds) →
@@ -25,11 +25,11 @@ Anthropic API key secrets (`ANTHROPIC_API_KEY_REVIEWER`,
 
 **Language/Version**: YAML (GitHub Actions workflow syntax) + POSIX shell
 steps — no new application language; this feature only extends
-`.github/workflows/claude-dev-agent.yml` and does not touch WhisperFlow's
+`.github/workflows/claude-agents-pipeline.yml` and does not touch WhisperFlow's
 Python source under `src/`/`tests/`.
 
 **Primary Dependencies**: `anthropics/claude-code-action@v1` (already used
-by `claude-dev-agent.yml` for `developer`; this feature adds two more
+by `claude-agents-pipeline.yml` for `developer`; this feature adds two more
 invocations of it, one per subagent), the `gh` CLI (already available on
 GitHub-hosted runners) for the workflow's own diff-fetch and PR-review-post
 steps, GitHub's `pull_request_review` webhook event.
@@ -41,7 +41,7 @@ review history and commit history on GitHub, which the workflow reads via
 **Testing**: Invocation-based smoke tests against a throwaway issue/PR
 (per FR-002/FR-009/FR-010 — an agent actually attempting a disallowed tool
 call and observing a literal denial, not a self-report), the same
-discipline `claude-dev-agent.yml`'s own header comments already document
+discipline `claude-agents-pipeline.yml`'s own header comments already document
 for `developer`'s automation-mode tool grants.
 
 **Target Platform**: GitHub Actions (`ubuntu-latest` runners, matching
@@ -156,7 +156,7 @@ files this feature touches are:
 
 ```text
 .github/workflows/
-└── claude-dev-agent.yml   # Extended: two new automation-mode invocations
+└── claude-agents-pipeline.yml   # Extended: two new automation-mode invocations
                             # (reviewer, qa) and their trigger wiring, added
                             # alongside the existing developer automation —
                             # not a new workflow file, per the Assumptions
@@ -178,7 +178,7 @@ does not touch the WhisperFlow product itself (spec.md Stakeholders /
 Non-Goals).
 
 **Structure Decision**: Single-file extension of the existing
-`claude-dev-agent.yml` workflow (not a new workflow file), consistent with
+`claude-agents-pipeline.yml` workflow (not a new workflow file), consistent with
 spec.md's Assumptions ("reuses the existing `claude-code-action` +
 automation-mode + `--allowedTools` pattern already proven for `developer`
 ... rather than introducing a different automation mechanism"). Design

@@ -84,7 +84,7 @@ container boundary for that unattended work rather than a devcontainer.
   (or a `settings` permissions block). Discovered the hard way in M8 via a
   silently-successful smoke test with `permission_denials_count: 20`. Any new
   automation-mode workflow needs this from the start — see
-  `.github/workflows/claude-dev-agent.yml` for the working pattern (its
+  `.github/workflows/claude-agents-pipeline.yml` for the working pattern (its
   `--allowedTools` list mirrors the invoked subagent's own `tools:` line
   exactly, so unattended runs get no more access than the subagent has
   interactively).

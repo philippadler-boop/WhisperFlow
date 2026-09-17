@@ -21,9 +21,9 @@ smaller than a multi-week feature.
 ## Current State (for accurate framing — not a proposal)
 
 As implemented today (`.claude/agents/*.md`, `CLAUDE.md`'s Subagents
-section, `.github/workflows/claude-dev-agent.yml`):
+section, `.github/workflows/claude-agents-pipeline.yml`):
 
-- `developer` runs unattended via `claude-dev-agent.yml`, triggered by
+- `developer` runs unattended via `claude-agents-pipeline.yml`, triggered by
   either (a) an issue getting the `claude-dev` label (implement a fresh
   task, open a new PR), or (b) a `pull_request_review` event with
   `state: changes_requested` (push a fix commit to the existing PR's
@@ -36,7 +36,7 @@ section, `.github/workflows/claude-dev-agent.yml`):
   Bash/git/gh tools by design) and decides whether to post a
   request-changes review; a human runs `qa` after review settles, and
   `qa` commits its own validation report onto the PR's branch.
-- `claude-dev-agent.yml`'s own header comment states this arrangement
+- `claude-agents-pipeline.yml`'s own header comment states this arrangement
   "does not create a fully closed, unsupervised review loop," specifically
   *because* `reviewer` is still manually invoked — the round cap is
   characterized as a safety net for that manual path being scripted/piped
@@ -54,7 +54,7 @@ section, `.github/workflows/claude-dev-agent.yml`):
 Only the `developer` step of the task lifecycle (implement → review → fix
 → qa → ready-to-merge) runs unattended. `reviewer` and `qa` each require a
 human to start a local session, which means the review-triggered fix loop
-that `claude-dev-agent.yml` already automates still stalls waiting for a
+that `claude-agents-pipeline.yml` already automates still stalls waiting for a
 human to run `reviewer` again after each fix, and waiting for a human to
 run `qa` after that. The idea is to extend the existing unattended-agent
 pattern (GitHub Actions + `claude-code-action`, automation mode,
@@ -171,7 +171,7 @@ by reading source alone.
   review via the workflow's own API call (not by the agent directly,
   which has no `gh`/`git`), using the same approve/request-changes
   semantics a human reviewer uses today, so that
-  `claude-dev-agent.yml`'s existing `pull_request_review` /
+  `claude-agents-pipeline.yml`'s existing `pull_request_review` /
   `changes_requested` trigger continues to fire correctly without
   modification.
 - **FR-005**: Per Resolved Decision 2, when `qa` runs in automation mode,
@@ -195,7 +195,7 @@ by reading source alone.
   existing counting mechanism (total `CHANGES_REQUESTED` reviews on the
   PR) and its default value MUST be raised from 3 to **5** as part of this
   feature. Reaching the cap MUST still stop further automatic dispatch and
-  hand back to a human, mirroring `claude-dev-agent.yml`'s existing "Stop
+  hand back to a human, mirroring `claude-agents-pipeline.yml`'s existing "Stop
   and hand back" behavior.
 - **FR-009**: Per Resolved Decision 5, automated `reviewer` and `qa`
   invocations MUST authenticate using two new dedicated Anthropic API
@@ -207,7 +207,7 @@ by reading source alone.
   turnaround time recorded, so the project owner can make an
   accept/reject call on the actual, measured increase — not an estimate.
 - **FR-010**: Any new automation-mode workflow (or modification to
-  `claude-dev-agent.yml`) introduced by this feature MUST grant tools
+  `claude-agents-pipeline.yml`) introduced by this feature MUST grant tools
   explicitly via `--allowedTools` (or an equivalent `settings.permissions`
   block) mirroring the invoked subagent's own declared `tools:`
   frontmatter exactly, per the existing "automation-mode grants zero tool
@@ -265,7 +265,7 @@ by reading source alone.
 
 - This feature reuses the existing `claude-code-action` + automation-mode
   (`prompt` input) + `--allowedTools` pattern already proven for
-  `developer` in `claude-dev-agent.yml`, rather than introducing a
+  `developer` in `claude-agents-pipeline.yml`, rather than introducing a
   different automation mechanism — no evidence in the idea note suggests
   otherwise.
 - "Automated" here means GitHub-Actions-triggered, unattended execution of
@@ -287,7 +287,7 @@ owner must:
 2. Register them as GitHub Actions repo secrets named
    `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA`, mirroring how
    `ANTHROPIC_API_KEY_DEV` is already configured for `developer` in
-   `claude-dev-agent.yml`.
+   `claude-agents-pipeline.yml`.
 
 This is a manual, human action — no agent in this pipeline (analyst,
 architect, developer, reviewer, qa) has the access needed to create

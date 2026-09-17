@@ -2,7 +2,7 @@
 
 **Feature**: [../spec.md](../spec.md) | **Plan**: [../plan.md](../plan.md)
 
-This is the external-facing contract for `.github/workflows/claude-dev-agent.yml`'s
+This is the external-facing contract for `.github/workflows/claude-agents-pipeline.yml`'s
 extension — analogous in role to `specs/001-video-subtitle-generator/contracts/cli.md`
 for the CLI feature. It documents what a PR author/reviewer can observe and
 rely on from this workflow, independent of its internal implementation.
