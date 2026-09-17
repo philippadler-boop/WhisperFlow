@@ -80,7 +80,13 @@ more accurate and require more resources:
 whisperflow transcribe .\samples\hello.mp4 --model tiny --no-review
 ```
 
-Available models are `tiny`, `base`, `small`, `medium`, and `large`.
+Available models are `tiny`, `base`, `small`, `medium`, and `large`. On
+constrained or CPU-only hardware (e.g. a CI runner, or a laptop with no
+GPU and limited CPU headroom), consider `--model tiny` if `base` doesn't
+keep up with the SC-002/SC-006 processing-time target — see
+[Benchmarking](#benchmarking) below and
+`specs/001-video-subtitle-generator/contracts/cli.md`'s minimum-hardware
+note for the evidence behind this recommendation.
 
 ### Review mode
 
@@ -148,7 +154,7 @@ Options:
 | Option | Default | Description |
 |---|---|---|
 | `--output`, `-o PATH` | `<video_basename>.srt` next to the input video | Where to write the `.srt` file |
-| `--model {tiny,base,small,medium,large}` | `base` | faster-whisper model size — smaller is faster, larger is more accurate |
+| `--model {tiny,base,small,medium,large}` | `base` | faster-whisper model size — smaller is faster, larger is more accurate; consider `--model tiny` on constrained/CPU-only hardware (see contracts/cli.md's minimum-hardware note) |
 | `--review` / `--no-review` | `--review` | With `--review`, opens the draft `.srt` in an editor and waits for confirmation before finalizing; `--no-review` finalizes immediately |
 | `--editor CMD` | `$EDITOR`/`$VISUAL`, else a built-in fallback prompt | Overrides which editor `--review` opens |
 
@@ -161,7 +167,8 @@ whisperflow transcribe .\samples\hello.mp4 --no-review
 # Custom output path
 whisperflow transcribe .\samples\hello.mp4 -o .\output\hello.srt --no-review
 
-# Smaller/faster model
+# Smaller/faster model (recommended on constrained/CPU-only hardware --
+# see contracts/cli.md's minimum-hardware note)
 whisperflow transcribe .\samples\hello.mp4 --model tiny --no-review
 
 # Review with an explicit, blocking editor
@@ -221,6 +228,14 @@ missed its target"). Both criteria are explicitly judged by a human (a reviewing
 user, a viewer) in spec.md, so this script gives `qa` a concrete,
 reproducible number to anchor that judgment against, not a replacement
 for it.
+
+`scripts/benchmark.py time` runs on CPU-only reference hardware are what
+back `--model tiny`'s recommendation for constrained hardware (T029) --
+see `specs/001-video-subtitle-generator/contracts/cli.md`'s
+minimum-hardware note for the measured numbers and open questions behind
+that recommendation, and run the benchmark yourself against a
+representative, realistically long video on your own hardware before
+choosing a model size for a time-sensitive workflow.
 
 ## Windows Installer Build
 

@@ -102,3 +102,15 @@ def test_readme_includes_a_review_mode_example_with_blocking_editor_flag():
 def test_readme_references_the_cli_contract_doc():
     text = _read_readme()
     assert "contracts/cli.md" in text
+
+
+def test_readme_documents_when_tiny_is_recommended():
+    """T029 investigated changing the default `--model` after short-clip
+    benchmarking looked borderline on CPU-only reference hardware, but
+    that evidence didn't hold up -- see contracts/cli.md's
+    minimum-hardware note. README should still point readers at `tiny`
+    as a recommendation for constrained/CPU-only hardware, not just state
+    the bare `base` default."""
+    text = _read_readme()
+    assert "minimum-hardware" in text
+    assert "SC-002" in text or "SC-006" in text

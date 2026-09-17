@@ -256,6 +256,11 @@ class TestTranscribeAudioMocked:
         assert captured["compute_type"] == COMPUTE_TYPE == "int8"
 
     def test_default_model_size_is_base(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        """T029 investigated changing this default; see contracts/cli.md's
+        minimum-hardware note for why `base` remains the default and
+        `tiny` is recommended only for constrained/CPU-only hardware
+        instead.
+        """
         captured: dict[str, object] = {}
 
         class _CapturingFakeModel(_FakeModel):

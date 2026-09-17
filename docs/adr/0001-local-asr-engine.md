@@ -60,3 +60,19 @@ available.
   to "no network calls," distinct from per-video transcription traffic;
   this should be made explicit in user-facing documentation so it isn't
   mistaken for a FR-004 violation.
+- T029 followed up on the "actual throughput ... is unverified until
+  benchmarked" caveat above: `scripts/benchmark.py time` against a short
+  (~3.5s) fixture on CPU-only reference hardware showed the CLI's `base`
+  default sometimes missing the SC-002/SC-006 ~2x-real-time target while
+  `tiny` consistently met it. That result conflicted with a separate,
+  real ~59-minute video benchmarked at `--model base` on comparable
+  hardware, which finished in 48.7s (~35x inside the target) — a strong
+  signal that the short-fixture numbers were dominated by fixed per-run
+  overhead rather than steady-state decode throughput, and not sufficient
+  evidence to justify defaulting every user to a less accurate model
+  (SC-003's accuracy cost was also never measured). `base` therefore
+  remains the CLI default; `contracts/cli.md`'s minimum-hardware note
+  recommends `--model tiny` only for constrained/CPU-only hardware, and
+  properly reconciling this conflict with a longer reference fixture and
+  a measured SC-003 accuracy delta is left as follow-up work rather than
+  changing the default on the current evidence.

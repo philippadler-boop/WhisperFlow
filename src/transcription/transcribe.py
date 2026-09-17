@@ -38,6 +38,11 @@ from audio.video_probe import Video
 from lib.errors import ModelLoadError, TranscriptionError
 
 #: Default `faster-whisper` model size (contracts/cli.md's `--model` default).
+#: T029 investigated lowering this after short-clip benchmarking looked
+#: borderline on CPU-only reference hardware, but that evidence didn't hold
+#: up against a real, much-longer video run -- see contracts/cli.md's
+#: minimum-hardware note, which recommends `tiny` for constrained hardware
+#: without changing this default.
 DEFAULT_MODEL_SIZE = "base"
 
 #: `device="auto"` lets CTranslate2 pick a GPU automatically when one is

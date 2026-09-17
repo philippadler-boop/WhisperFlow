@@ -163,6 +163,13 @@ def test_model_option_rejects_choice_outside_contract_set(cli_runner: CliRunner)
 def test_default_model_is_base(
     cli_runner: CliRunner, captured_pipeline_call: dict[str, Any]
 ) -> None:
+    """T029 investigated changing this default after short-clip
+    benchmarking looked borderline on CPU-only reference hardware, but
+    that evidence conflicted with a real, much-longer benchmark run and
+    left SC-003's accuracy cost unmeasured -- see contracts/cli.md's
+    minimum-hardware note. `base` remains the default; `tiny` is
+    recommended only for constrained/CPU-only hardware.
+    """
     result = cli_runner.invoke(app, ["transcribe", "video.mp4"])
     assert result.exit_code == 0
     assert captured_pipeline_call["model"] == ModelSize.BASE

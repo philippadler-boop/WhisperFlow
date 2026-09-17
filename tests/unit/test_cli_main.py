@@ -76,6 +76,10 @@ def test_video_path_argument_is_required(cli_runner: CliRunner) -> None:
 def test_default_model_is_base(
     cli_runner: CliRunner, captured_pipeline_call: dict[str, Any]
 ) -> None:
+    """T029 investigated changing this default; see contracts/cli.md's
+    minimum-hardware note for why `base` remains the default and `tiny`
+    is recommended only for constrained/CPU-only hardware instead.
+    """
     result = cli_runner.invoke(app, ["transcribe", "video.mp4"])
     assert result.exit_code == 0
     assert captured_pipeline_call["model"] == ModelSize.BASE

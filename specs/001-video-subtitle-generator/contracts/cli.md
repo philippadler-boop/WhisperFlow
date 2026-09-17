@@ -20,7 +20,7 @@ whisperflow transcribe VIDEO_PATH [OPTIONS]
 | Option | Default | Description |
 |---|---|---|
 | `--output`, `-o PATH` | `<video_basename>.srt` next to the input video | Where to write the `.srt` file (FR-006) |
-| `--model {tiny,base,small,medium,large}` | `base` | faster-whisper model size — smaller is faster, larger is more accurate (research.md) |
+| `--model {tiny,base,small,medium,large}` | `base` | faster-whisper model size — smaller is faster, larger is more accurate (research.md). See the minimum-hardware note below for when `tiny` is recommended instead. |
 | `--review / --no-review` | `--review` | With `--review`, after generating a draft `.srt` the command opens it in `$EDITOR` (or `--editor`) and waits for confirmation before finalizing (FR-009, FR-010, User Story 2). `--no-review` finalizes immediately — for scripting/automation. |
 | `--editor CMD` | value of `$EDITOR`/`$VISUAL`, else a built-in fallback prompt | Overrides which editor `--review` opens |
 
@@ -66,3 +66,33 @@ report an error" requirement.
 - Rerunning the same command after an interrupted prior run always starts
   a fresh job from `Extracting audio…` (Out of Scope: Resumable
   processing) — there is no `--resume` option in v1.
+
+## Minimum-hardware note (SC-002/SC-006, T029)
+
+`scripts/benchmark.py time` (T025/T028) was run on CPU-only reference
+hardware with no GPU (a 4-vCPU host — representative of a typical CI
+runner / constrained consumer machine with no dedicated GPU), against a
+short (~3.5s) speech fixture, at several `--model` sizes. On that short
+fixture, `base` sometimes fell outside the SC-002/SC-006 ~2x-real-time
+target while `tiny` consistently met it.
+
+That short-clip result is **not** treated as sufficient evidence to
+change the CLI's default: a short clip's elapsed time is dominated by
+fixed per-run overhead (process startup, model load, one `ffmpeg`
+invocation) rather than the model's steady-state decode throughput that
+SC-002/SC-006 actually gate on, and it directly conflicts with a separate,
+real ~59-minute video benchmarked at `--model base` on comparable
+hardware, which completed in 48.7s (realtime ratio ~0.014 — roughly 35x
+inside the target, not borderline). The accuracy cost of `tiny` relative
+to `base` (SC-003, ≥90% accuracy) has also not been measured with
+`scripts/benchmark.py corpus`.
+
+Given that unresolved conflict, `base` remains the CLI default. `--model
+tiny` is recommended as a fallback specifically for constrained or
+CPU-only hardware (e.g. CI runners, or a laptop with no GPU and limited
+CPU headroom) if you find `base` doesn't keep up with SC-002/SC-006 on
+your machine — verify with `scripts/benchmark.py time` against a
+representative, realistically long video before relying on either
+model size for a time-sensitive workflow. A GPU (`device="auto"` in
+`research.md`'s ASR-engine decision already uses one automatically when
+present) removes most of this concern regardless of model size.
