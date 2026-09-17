@@ -25,8 +25,8 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Confirm prerequisites this feature depends on are actually in place before any workflow edit begins.
 
-- [ ] T101 Confirm `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA` exist as repo secrets (`gh secret list`) — already provisioned per spec.md's Manual Setup Required, but re-verify at implementation start since they were created in a prior session (FR-009, FR-014)
-- [ ] T102 [P] Confirm the automated bot identity `developer`'s existing automation-mode invocation authenticates as, by inspecting a real recent `developer`-authored commit (`git log --format='%an <%ae>'` on a `claude-dev`-labeled PR branch) — this is the empirical fact ADR 0007's actor-check and ADR 0009's `sender` check both depend on; record the confirmed login string in a code comment at the point it's used in T108/T112 rather than assuming `claude[bot]` by analogy alone (ADR 0007 Consequences)
+- [x] T101 Confirm `ANTHROPIC_API_KEY_REVIEWER` and `ANTHROPIC_API_KEY_QA` exist as repo secrets (`gh secret list`) — already provisioned per spec.md's Manual Setup Required, but re-verify at implementation start since they were created in a prior session (FR-009, FR-014)
+- [x] T102 [P] Confirm the automated bot identity `developer`'s existing automation-mode invocation authenticates as, by inspecting a real recent `developer`-authored commit (`git log --format='%an <%ae>'` on a `claude-dev`-labeled PR branch) — this is the empirical fact ADR 0007's actor-check and ADR 0009's `sender` check both depend on; record the confirmed login string in a code comment at the point it's used in T108/T112 rather than assuming `claude[bot]` by analogy alone (ADR 0007 Consequences)
 
 **Checkpoint**: Prerequisites confirmed — workflow editing can begin
 
