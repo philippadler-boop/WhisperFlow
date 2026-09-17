@@ -278,3 +278,67 @@ jobs:
       # sessions (not automated by M8), and a human merges. The point of
       # M8 is proving unattended work clears the same gates, not skipping
       # them -- extending it to review-triggered fixes doesn't change that.
+
+  # T103 (feature 002, reviewer/qa automation): job skeleton only. The
+  # trigger condition below is a deliberate `if: false` placeholder --
+  # this job is wired into the workflow file now (its own isolated tools/
+  # secret/permissions grant, per ADR 0008/ADR 0009), but never actually
+  # runs until T106 (Phase 3) replaces the placeholder with the real
+  # `pull_request`/`opened,synchronize` condition scoped to the
+  # automation bot actor. Landing the skeleton first, inert, keeps this
+  # PR reviewable in isolation from the trigger-wiring/diff-supply work
+  # that follows (see tasks.md's Phase 2/Phase 3 split).
+  reviewer-agent:
+    if: false
+    runs-on: ubuntu-latest
+    # Read-only tool grant (Read/Grep/Glob only -- see below), so this
+    # job needs no more than read access to repo contents. Phase 3
+    # (T107/T108) adds a checkout step and a `gh pr diff` fetch, which
+    # will need `pull-requests: read` added here at that point -- not
+    # added preemptively since this skeleton has no step that uses it
+    # yet.
+    permissions:
+      contents: read
+    steps:
+      - name: Run Claude Code (reviewer agent, unattended)
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Per ADR 0008: each of the three automation-mode invocations
+          # (developer, reviewer, qa) references only its own role's
+          # secret, as a literal value -- no shared variable, anchor, or
+          # computed lookup -- so `reviewer`'s spend is separable from
+          # `developer`'s in Anthropic's own usage view and this job
+          # cannot silently fall back to ANTHROPIC_API_KEY_DEV.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_REVIEWER }}
+
+          # Placeholder prompt: this step never actually runs while the
+          # job-level `if: false` above holds. Phase 3 (T107-T109) adds
+          # the checkout, `gh pr diff` fetch, and real prompt-building
+          # steps (embedding the fetched diff via this `prompt:` field's
+          # own YAML substitution, per ADR 0005) that make this
+          # meaningful.
+          prompt: "Placeholder -- reviewer-agent's trigger is not wired yet (see tasks.md T106)."
+
+          # --allowedTools is exactly `Read,Grep,Glob`, per FR-002 and
+          # contracts/automation-triggers.md's tool-grant table: reviewer
+          # MUST NOT get Write, Edit, Bash, or any git/gh access in
+          # automation mode, mirroring .claude/agents/reviewer.md's own
+          # `tools:` line -- a reviewer that can fix what it's reviewing,
+          # or shell out on its own, isn't an independent review. --model
+          # sonnet is a belt-and-suspenders pin, same rationale as
+          # `dev-agent`'s own claude_args above (reviewer.md's frontmatter
+          # already pins `model: sonnet`, but pinning it again here means
+          # this workflow doesn't silently drift if that frontmatter is
+          # ever edited without this file being touched in the same
+          # change).
+          claude_args: '--agent reviewer --model sonnet --allowedTools "Read,Grep,Glob"'
+
+          # github_token is deliberately omitted here too, mirroring
+          # dev-agent's existing rationale above: leaving it unset
+          # authenticates this step as the Claude GitHub App rather than
+          # the default GITHUB_TOKEN. (Unlike dev-agent, this job doesn't
+          # push commits -- but per contracts/automation-triggers.md's
+          # Review-posting contract, the actual `gh pr review` call that
+          # posts reviewer's verdict is a separate workflow step the
+          # *workflow* performs, added in a later phase, not something
+          # this claude-code-action step does itself.)
