@@ -345,25 +345,45 @@ jobs:
       github.event.sender.type == 'Bot'
     runs-on: ubuntu-latest
     # Read-only tool grant (Read/Grep/Glob only -- see below), so this
-    # job needs no more than read access to repo contents. Phase 3
-    # (T107/T108) adds a checkout step and a `gh pr diff` fetch, which
-    # will need `pull-requests: read` added here at that point -- not
-    # added preemptively since this skeleton has no step that uses it
-    # yet.
+    # job needs no more than read access to repo contents. T108 (the
+    # `gh pr diff` fetch) will need `pull-requests: read` added here at
+    # that point -- not added preemptively since no step uses it yet.
     #
     # NOTE (T106): the trigger above is now real, so this job genuinely
     # dispatches on every qualifying `pull_request` event from here on --
-    # it is no longer inert. It still has no checkout step or diff fetch
-    # (those are T107/T108, still open), so until that lands it will run
-    # `reviewer` against the placeholder prompt below rather than an
-    # actual diff. That is an intentionally small, reviewable increment
-    # (wiring the trigger before the diff-supply work that depends on it
-    # exists) rather than a bug -- but it does mean this job now spends
+    # it is no longer inert. T107 (below) adds the `Checkout PR head`
+    # step; the `gh pr diff` fetch and real prompt-building steps
+    # (T108/T109) still haven't landed, so until those land `reviewer`
+    # still receives only the placeholder prompt below rather than an
+    # actual diff, even though the checked-out tree is now the PR's own.
+    # That is an intentionally small, reviewable increment (landing the
+    # checkout before the diff-fetch work that depends on it exists)
+    # rather than a bug -- but it does mean this job now spends
     # `ANTHROPIC_API_KEY_REVIEWER` budget on every automation PR
     # open/push until Phase 3 finishes; that's expected to be brief.
     permissions:
       contents: read
     steps:
+      # T107 (ADR 0005 Decision 1): checks out the PR's own head branch
+      # at its current `head.sha` -- deliberately NOT `main` and NOT a
+      # bare default-branch checkout -- so `reviewer`'s Read/Grep/Glob
+      # calls resolve against the PR's actual current file tree (the
+      # context reviewer.md already expects beyond the diff hunks
+      # themselves: the architecture doc, the task spec, related files
+      # the diff didn't touch). Pinning `ref:` to `head.sha` rather than
+      # just the branch name avoids a race where the branch moves between
+      # the triggering event and this step actually running, matching the
+      # same stale-commit discipline `data-model.md`'s `PRReviewEvent`
+      # validation rule requires for the `approved` trigger path (ADR
+      # 0005 Consequences). `actions/checkout@v7` and `fetch-depth: 1`
+      # mirror `dev-agent`'s own checkout step above for consistency --
+      # this job has no need for deeper history, same as that one.
+      - name: Checkout PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
       - name: Run Claude Code (reviewer agent, unattended)
         uses: anthropics/claude-code-action@v1
         with:
