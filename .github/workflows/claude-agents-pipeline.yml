@@ -4,7 +4,7 @@ name: Claude Agents Pipeline
 # stays the interactive @claude-mention workflow; this one runs in
 # automation mode (a `prompt` input, so Claude doesn't wait for a mention
 # -- see code.claude.com/docs/en/github-actions, "Interactive and
-# automation modes") for two distinct triggers:
+# automation modes") for three distinct triggers:
 #
 #   1. issues/labeled (claude-dev label) -- pick up a fresh task and open
 #      a new PR. Original M8 behavior, unchanged.
@@ -21,6 +21,16 @@ name: Claude Agents Pipeline
 #      guards against the case where request-changes reviews get posted
 #      faster than a human is actually watching (e.g. a scripted/piped
 #      reviewer invocation, as this repo has started doing).
+#   3. pull_request/opened,synchronize -- feature 002 (reviewer/qa
+#      automation), dispatches `reviewer-agent` (see that job's own `if:`
+#      below). Fires both right after `dev-agent`'s issues/labeled run
+#      opens a brand-new PR (`opened`) and after every subsequent
+#      automation-pushed fix commit (`synchronize`), per ADR 0009. Scoped
+#      tightly by a `sender` actor check on the job itself (see
+#      `reviewer-agent`) so this does not fire `reviewer` on every PR in
+#      the repository -- see that job's own comment for why an
+#      `event_name` guard is also required there, not just the actor
+#      check ADR 0009 names.
 #
 # UNVERIFIED as of this draft, same as every genuinely new mechanism in
 # this file has been treated before being trusted (--agent, --allowedTools,
@@ -31,11 +41,15 @@ name: Claude Agents Pipeline
 # multi-line GITHUB_OUTPUT prompt-building step. Smoke-test all of this
 # with a throwaway PR + a real `gh pr review --request-changes` before
 # trusting it on real work, same discipline as every prior change here.
+# `reviewer-agent`'s new `pull_request` trigger (T106) is equally
+# unverified until the same throwaway-PR smoke test also exercises it.
 on:
   issues:
     types: [labeled]
   pull_request_review:
     types: [submitted]
+  pull_request:
+    types: [opened, synchronize]
 
 env:
   # Safety net for the pull_request_review path only (see the "Count
@@ -283,17 +297,52 @@ jobs:
       # M8 is proving unattended work clears the same gates, not skipping
       # them -- extending it to review-triggered fixes doesn't change that.
 
-  # T103 (feature 002, reviewer/qa automation): job skeleton only. The
-  # trigger condition below is a deliberate `if: false` placeholder --
-  # this job is wired into the workflow file now (its own isolated tools/
-  # secret/permissions grant, per ADR 0008/ADR 0009), but never actually
-  # runs until T106 (Phase 3) replaces the placeholder with the real
-  # `pull_request`/`opened,synchronize` condition scoped to the
-  # automation bot actor. Landing the skeleton first, inert, keeps this
-  # PR reviewable in isolation from the trigger-wiring/diff-supply work
-  # that follows (see tasks.md's Phase 2/Phase 3 split).
+  # T103 (feature 002, reviewer/qa automation): job skeleton, wired for
+  # real by T106. Dispatches on the `pull_request`/`opened,synchronize`
+  # events added to the workflow-level `on:` block above -- this single
+  # trigger definition uniformly covers both the very first review (right
+  # after `dev-agent`'s issues/labeled run opens a new PR, firing
+  # `opened`) and every re-review after a fix-round push (firing
+  # `synchronize`), per ADR 0009's Decision.
+  #
+  # The `if:` below requires BOTH:
+  #   1. `github.event_name == 'pull_request'` -- necessary because this
+  #      workflow's `on:` block is shared across three event types
+  #      (`issues`, `pull_request_review`, `pull_request`), all of which
+  #      carry a `sender` field. Without this guard, the `sender` actor
+  #      check alone (condition 2) would also match the `pull_request_review`
+  #      event that `qa-agent`'s trigger (T116) depends on once
+  #      `reviewer-agent` itself starts posting APPROVE/CHANGES_REQUESTED
+  #      reviews as the same bot identity (Phase 4/T113) -- that would
+  #      spuriously re-dispatch `reviewer-agent` on its own just-posted
+  #      review instead of leaving that event exclusively for `qa-agent`.
+  #      ADR 0009's own job-graph rationale (three independent
+  #      dispatches, no cross-job overlap) depends on this not happening.
+  #   2. `github.event.sender.login == 'claude[bot]' && github.event.sender.type
+  #      == 'Bot'` -- the actor-identification check ADR 0007 establishes
+  #      and ADR 0009 applies to `sender` (rather than `review.user`, the
+  #      field ADR 0007 checks for `qa-agent`) since the relevant actor for
+  #      a `pull_request` event is whoever performed the push/open, not the
+  #      PR's original author field. `claude[bot]` is the literal login
+  #      confirmed empirically per T102 by inspecting a real
+  #      `developer`-authored commit's author identity
+  #      (`git log --format='%an <%ae>'` on this repo shows
+  #      `claude[bot] <209825114+claude[bot]@users.noreply.github.com>` for
+  #      every automation-mode commit observed so far) -- not assumed from
+  #      the ADRs' own illustrative examples by analogy alone.
+  # This check is now load-bearing for two independent jobs'
+  # dispatch (this one and, via ADR 0007, `qa-agent`'s) -- per ADR 0009
+  # Consequences, it MUST stay scoped this tightly or `reviewer` would run
+  # on every PR in the repository, including ones with nothing to do with
+  # this automation. It also means a human's own manual commit pushed
+  # directly to an automation-managed PR branch will not trigger an
+  # automatic re-review (the `sender` won't match) -- intentional and
+  # protective, not a gap (ADR 0009 Consequences).
   reviewer-agent:
-    if: false
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.sender.login == 'claude[bot]' &&
+      github.event.sender.type == 'Bot'
     runs-on: ubuntu-latest
     # Read-only tool grant (Read/Grep/Glob only -- see below), so this
     # job needs no more than read access to repo contents. Phase 3
@@ -301,6 +350,17 @@ jobs:
     # will need `pull-requests: read` added here at that point -- not
     # added preemptively since this skeleton has no step that uses it
     # yet.
+    #
+    # NOTE (T106): the trigger above is now real, so this job genuinely
+    # dispatches on every qualifying `pull_request` event from here on --
+    # it is no longer inert. It still has no checkout step or diff fetch
+    # (those are T107/T108, still open), so until that lands it will run
+    # `reviewer` against the placeholder prompt below rather than an
+    # actual diff. That is an intentionally small, reviewable increment
+    # (wiring the trigger before the diff-supply work that depends on it
+    # exists) rather than a bug -- but it does mean this job now spends
+    # `ANTHROPIC_API_KEY_REVIEWER` budget on every automation PR
+    # open/push until Phase 3 finishes; that's expected to be brief.
     permissions:
       contents: read
     steps:
@@ -315,13 +375,15 @@ jobs:
           # cannot silently fall back to ANTHROPIC_API_KEY_DEV.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_REVIEWER }}
 
-          # Placeholder prompt: this step never actually runs while the
-          # job-level `if: false` above holds. Phase 3 (T107-T109) adds
-          # the checkout, `gh pr diff` fetch, and real prompt-building
-          # steps (embedding the fetched diff via this `prompt:` field's
-          # own YAML substitution, per ADR 0005) that make this
-          # meaningful.
-          prompt: "Placeholder -- reviewer-agent's trigger is not wired yet (see tasks.md T106)."
+          # Placeholder prompt: the job-level `if:` above is now the real
+          # trigger (T106), so this step DOES run on every qualifying PR
+          # open/push -- but Phase 3 (T107-T109) still hasn't landed the
+          # checkout, `gh pr diff` fetch, and real prompt-building steps
+          # (embedding the fetched diff via this `prompt:` field's own
+          # YAML substitution, per ADR 0005) that make this meaningful.
+          # Until then `reviewer` receives only this static text and has
+          # no diff or checked-out tree to review.
+          prompt: "Placeholder -- reviewer-agent's diff-supply steps are not wired yet (see tasks.md T107-T109)."
 
           # --allowedTools is exactly `Read,Grep,Glob`, per FR-002 and
           # contracts/automation-triggers.md's tool-grant table: reviewer
