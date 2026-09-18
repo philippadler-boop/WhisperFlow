@@ -628,6 +628,87 @@ jobs:
           # *workflow* performs, added in a later phase, not something
           # this claude-code-action step does itself.)
 
+      # T112 (ADR 0007 Decision 1): obtains the non-default GitHub identity
+      # T113 will need for the `gh pr review` call that posts reviewer's
+      # verdict. ADR 0007 Decision 1 names two paths: (a) reuse whichever
+      # mechanism claude-code-action exposes for a subsequent plain `gh`
+      # step to authenticate as the same Claude GitHub App identity
+      # dev-agent's/reviewer-agent's own claude-code-action steps above
+      # already use when `github_token` is omitted, confirmed against the
+      # action's actual documented outputs; or (b), if no such reuse path
+      # exists, fall back to `actions/create-github-app-token` with
+      # dedicated credentials.
+      #
+      # HONEST STATUS OF (a): this repo has no evidence anywhere -- not in
+      # research.md's "Additional technical grounding for Phase 1" section
+      # (the only place claude-code-action's github_token omission is
+      # explained), not in ADR 0005/0007/0009, not in this workflow file's
+      # own pre-existing comments -- of a specific, confirmed output field
+      # or other reuse mechanism claude-code-action exposes for a *separate,
+      # later* step to authenticate as that same identity. Every existing
+      # mention of omitting `github_token` documents only that doing so
+      # changes which identity the *action's own internal* git/gh calls use
+      # (e.g. opening a PR) -- never that the resulting token is exported
+      # for a later step to consume. This environment has no web access and
+      # this repo does not vendor the action's source, so that absence of
+      # evidence cannot be upgraded to a confirmed "no" either -- it is
+      # simply unconfirmed. Per Constitution Principle V and CLAUDE.md's
+      # "test by invocation, not self-report" lesson, inventing a plausible
+      # -looking field name here (e.g. some `steps.<id>.outputs.*-token`)
+      # and presenting it as if verified would repeat exactly the mistake
+      # those rules exist to prevent. Per the task's own explicit
+      # instruction for this fork, path (b) -- the fallback -- is
+      # implemented below instead.
+      #
+      # MANUAL SETUP REQUIRED -- flagged back to the project owner per ADR
+      # 0007 Consequences ("If no reuse path exists and a dedicated GitHub
+      # App/PAT must be provisioned, that constitutes new Manual Setup
+      # beyond what spec.md's Manual Setup Required section anticipated
+      # ... this must be raised back to the project owner explicitly, not
+      # added silently as an implementation detail"): the two secrets this
+      # step references, `REVIEWER_GITHUB_APP_ID` and
+      # `REVIEWER_GITHUB_APP_PRIVATE_KEY`, do NOT exist yet as repo secrets
+      # (per T101, only ANTHROPIC_API_KEY_DEV/REVIEWER/QA are provisioned).
+      # Before this step -- and T113, which will consume its `token`
+      # output -- can actually work, the project owner must:
+      #   1. Create (or designate an existing) GitHub App and install it on
+      #      this repository with at least `pull-requests: write`
+      #      permission (needed to post a review) and `contents: read`.
+      #   2. Register that App's numeric App ID as the
+      #      `REVIEWER_GITHUB_APP_ID` repo secret, and a generated private
+      #      key for it (PEM format) as the `REVIEWER_GITHUB_APP_PRIVATE_KEY`
+      #      repo secret.
+      # These are distinct from the default `GITHUB_TOKEN` and from the
+      # `ANTHROPIC_API_KEY_*` secrets (which authenticate model calls, not
+      # GitHub API calls, and are the wrong credential type here -- ADR
+      # 0007 Decision 1).
+      #
+      # `continue-on-error: true` is deliberate and scoped narrowly to this
+      # not-yet-provisioned state: with the two secrets above absent,
+      # `actions/create-github-app-token` fails outright, and this is
+      # currently the last step in the job -- an unguarded failure here
+      # would flip this already-live job (it dispatches on every real PR
+      # per T106) from green to red for every PR reviewed from now on, even
+      # though nothing downstream depends on this step's output yet (T113
+      # is the one that will consume `steps.reviewer_identity.outputs.token`,
+      # and does not exist in this PR). This does not "silently" mask a
+      # real problem: the step still runs and its failure is fully visible
+      # in the job's own step-by-step log, just not escalated to an overall
+      # job failure until T113 actually depends on it succeeding. Once the
+      # two secrets above are provisioned, this step succeeds normally and
+      # `continue-on-error` becomes a no-op in practice; T113 should revisit
+      # whether to remove it once posting the review genuinely depends on
+      # this step's output.
+      - name: Obtain non-default GitHub identity for posting the review
+        id: reviewer_identity
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.REVIEWER_GITHUB_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
   # T104 (feature 002, reviewer/qa automation): job skeleton only, mirroring
   # T103's reviewer-agent skeleton above. The trigger condition below is a
   # deliberate `if: false` placeholder -- this job is wired into the
