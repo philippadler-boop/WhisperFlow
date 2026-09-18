@@ -459,6 +459,18 @@ jobs:
         # reviewer's actual prompt, and gives reviewer explicit instructions
         # on how to use its Read/Grep/Glob tools alongside that diff.
         #
+        # T111 (ADR 0006 Decision, bullet 1): the static instructional text
+        # this step builds (PROMPT_TAIL below) also requires the response to
+        # begin with a literal, exact "VERDICT: APPROVE" or
+        # "VERDICT: REQUEST_CHANGES" first line, ahead of the human-readable
+        # report reviewer.md's Responsibilities section already asks for.
+        # This lives entirely here, in the workflow's own prompt-building
+        # step -- not in .claude/agents/reviewer.md itself -- per FR-012 and
+        # ADR 0006 Consequences ("reviewer.md itself is unchanged"). A later
+        # task (T113) adds the workflow step that actually parses this line
+        # and dispatches to `gh pr review --approve` /
+        # `--request-changes`; this task only adds the instruction text.
+        #
         # A dedicated step (id: build_prompt) is used here, mirroring
         # dev-agent's own "Build prompt for this trigger" step above, rather
         # than referencing steps.fetch_diff.outputs.diff directly inside
@@ -545,6 +557,29 @@ jobs:
           request changes with specific, actionable points (file/line,
           what is wrong, why it matters), per your own reviewer.md
           responsibilities.
+
+          Your response MUST begin with a machine-readable verdict line as
+          the exact first line of your response -- no preamble, blank
+          line, heading, or other text before it. That first line must be
+          one of these two literal strings, character-for-character, and
+          nothing else on the line:
+
+          VERDICT: APPROVE
+          VERDICT: REQUEST_CHANGES
+
+          Use "VERDICT: APPROVE" if and only if you are approving the PR
+          outright, with no requested changes. Use
+          "VERDICT: REQUEST_CHANGES" if you are requesting any changes at
+          all, however small. Do not write any paraphrase, summary, or
+          variation of these strings (e.g. not "Verdict: Approve", not
+          "VERDICT: Approved", not "My verdict is APPROVE", not
+          "VERDICT: APPROVE - looks good") -- an automated step
+          downstream matches this line by exact literal string comparison
+          and will fail the workflow visibly if it does not match either
+          literal exactly. After that first line, write your full
+          human-readable report (approval rationale, or the specific
+          actionable points) on subsequent lines exactly as described
+          above.
           PROMPT_TAIL
             echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
