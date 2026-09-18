@@ -43,9 +43,13 @@ env:
   # Once this many CHANGES_REQUESTED reviews have accumulated on a PR,
   # claude-agents-pipeline stops auto-fixing and posts a comment instead of
   # dispatching another round -- a human needs to look at it directly, or
-  # re-invoke `developer` manually to keep going deliberately. Tune
-  # freely; nothing else in this file depends on the specific number.
-  MAX_AUTO_FIX_ROUNDS: 3
+  # re-invoke `developer` manually to keep going deliberately. Raised from
+  # 3 to 5 per Resolved Decision 3 / FR-008 (feature 002,
+  # reviewer/qa-automation): with `reviewer`/`qa` now in the automated
+  # loop too, 3 rounds proved too tight a cap for the added
+  # review/fix/re-review cycles. The counting query and "Stop and hand
+  # back" step below are unchanged -- only this constant moves (ADR 0009).
+  MAX_AUTO_FIX_ROUNDS: 5
 
 jobs:
   dev-agent:
