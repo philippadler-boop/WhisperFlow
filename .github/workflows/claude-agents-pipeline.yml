@@ -344,25 +344,29 @@ jobs:
       github.event.sender.login == 'claude[bot]' &&
       github.event.sender.type == 'Bot'
     runs-on: ubuntu-latest
-    # Read-only tool grant (Read/Grep/Glob only -- see below), so this
-    # job needs no more than read access to repo contents. T108 (the
-    # `gh pr diff` fetch) will need `pull-requests: read` added here at
-    # that point -- not added preemptively since no step uses it yet.
+    # Read-only tool grant (Read/Grep/Glob only -- see below), so this job
+    # needs no more than read access to repo contents and PRs.
+    # `pull-requests: read` is required by the `Fetch PR diff` step (T108)
+    # below, whose `gh pr diff` call reads the PR via the default
+    # `GITHUB_TOKEN` (exposed to that step as `github.token`) -- it was
+    # deliberately not added before T108 landed, since no step used it yet.
     #
     # NOTE (T106): the trigger above is now real, so this job genuinely
     # dispatches on every qualifying `pull_request` event from here on --
-    # it is no longer inert. T107 (below) adds the `Checkout PR head`
-    # step; the `gh pr diff` fetch and real prompt-building steps
-    # (T108/T109) still haven't landed, so until those land `reviewer`
-    # still receives only the placeholder prompt below rather than an
-    # actual diff, even though the checked-out tree is now the PR's own.
-    # That is an intentionally small, reviewable increment (landing the
-    # checkout before the diff-fetch work that depends on it exists)
-    # rather than a bug -- but it does mean this job now spends
-    # `ANTHROPIC_API_KEY_REVIEWER` budget on every automation PR
-    # open/push until Phase 3 finishes; that's expected to be brief.
+    # it is no longer inert. T107 added the `Checkout PR head` step; T108
+    # (below) adds the `gh pr diff` fetch. The real prompt-building step
+    # (T109, embedding the fetched diff via this job's `prompt:` field)
+    # still hasn't landed, so until then `reviewer` still receives only the
+    # placeholder prompt below rather than an actual diff, even though the
+    # diff is now fetched and exposed as this step's own output. That is an
+    # intentionally small, reviewable increment (landing the fetch before
+    # the prompt-wiring work that depends on it exists) rather than a bug
+    # -- but it does mean this job now spends `ANTHROPIC_API_KEY_REVIEWER`
+    # budget on every automation PR open/push until Phase 3 finishes;
+    # that's expected to be brief.
     permissions:
       contents: read
+      pull-requests: read
     steps:
       # T107 (ADR 0005 Decision 1): checks out the PR's own head branch
       # at its current `head.sha` -- deliberately NOT `main` and NOT a
@@ -384,6 +388,67 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
+      # T108 (ADR 0005 Decision 2): fetches the PR's diff via `gh pr diff`
+      # and exposes it as this step's own `diff` output. This step's job is
+      # only to fetch and expose the diff -- it does NOT wire it into
+      # `reviewer`'s prompt; that is T109, a separate task.
+      #
+      # SECURITY: a PR's diff is exactly as attacker-controlled as the
+      # issue titles and review bodies `dev-agent`'s "Build prompt for this
+      # trigger" step above already handles (anyone who can push to the PR
+      # branch controls this text). Per ADR 0005's Consequences, this step
+      # follows that exact `env:`-then-`"$VAR"`-inside-heredoc pattern:
+      # `gh pr diff`'s output is captured into the `$DIFF` shell variable
+      # (a plain command substitution, not a GitHub Actions `${{ }}`
+      # expression -- there is no `${{ }}` form for a command's stdout),
+      # then referenced only as `"$DIFF"` inside the heredoc body below. It
+      # is never spliced via `${{ }}` directly into this `run:` step's
+      # script text, which is what would let hostile diff content (e.g.
+      # backticks or `$(...)`) become script *source* rather than data --
+      # the same reasoning already documented above for `$ISSUE_TITLE`.
+      #
+      # The one difference from that step's pattern is the heredoc
+      # delimiter: that step uses a fixed string
+      # (`PROMPT_EOF_8f3a2b91`), which is fine for a short issue title, but
+      # ADR 0005 Decision 2 requires a delimiter generated fresh at runtime
+      # here, since a diff's contents are large and attacker-influenced
+      # enough that a fixed delimiter risks an accidental collision (a
+      # diff line that happens to equal the delimiter would truncate the
+      # captured value). `/proc/sys/kernel/random/uuid` is used to generate
+      # it -- a Linux kernel feature present since kernel 3.17 with no
+      # package to install, unlike `uuidgen` (part of `util-linux`'s
+      # `uuid-runtime`, not guaranteed present on every runner image) -- a
+      # `$RANDOM`-based token is the fallback if that path is ever
+      # unreadable.
+      #
+      # Per FR-013 and ADR 0005 Consequences, this step fails the job
+      # visibly rather than silently continuing if `gh pr diff` fails
+      # (already covered by GitHub Actions' default `bash -eo pipefail`
+      # invocation of `run:` scripts, per its documented default shell
+      # behavior -- a non-zero `gh` exit code fails this step immediately)
+      # or if it succeeds but returns empty output (an explicit check
+      # below, since a zero exit with empty stdout would otherwise pass
+      # `set -e` silently -- e.g. if the PR were closed/emptied between the
+      # triggering event and this step running).
+      - name: Fetch PR diff
+        id: fetch_diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          DIFF="$(gh pr diff "$PR_NUMBER" --repo "$REPO")"
+          if [ -z "$DIFF" ]; then
+            echo "::error::gh pr diff returned empty output for PR #$PR_NUMBER -- refusing to continue with no diff for reviewer to review (FR-013)."
+            exit 1
+          fi
+          DELIM="DIFF_EOF_$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${RANDOM}${RANDOM}${RANDOM}")"
+          {
+            echo "diff<<$DELIM"
+            echo "$DIFF"
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code (reviewer agent, unattended)
         uses: anthropics/claude-code-action@v1
         with:
@@ -397,12 +462,14 @@ jobs:
 
           # Placeholder prompt: the job-level `if:` above is now the real
           # trigger (T106), so this step DOES run on every qualifying PR
-          # open/push -- but Phase 3 (T107-T109) still hasn't landed the
-          # checkout, `gh pr diff` fetch, and real prompt-building steps
-          # (embedding the fetched diff via this `prompt:` field's own
-          # YAML substitution, per ADR 0005) that make this meaningful.
-          # Until then `reviewer` receives only this static text and has
-          # no diff or checked-out tree to review.
+          # open/push, and the tree is checked out (T107) and the diff is
+          # fetched and available as `steps.fetch_diff.outputs.diff` (T108)
+          # -- but the real prompt-building step that embeds the fetched
+          # diff into this `prompt:` field via YAML substitution (per ADR
+          # 0005 Decision 3) is T109, which still hasn't landed. Until then
+          # `reviewer` receives only this static text rather than the
+          # actual diff, even though it is now sitting in a step output
+          # ready to be consumed.
           prompt: "Placeholder -- reviewer-agent's diff-supply steps are not wired yet (see tasks.md T107-T109)."
 
           # --allowedTools is exactly `Read,Grep,Glob`, per FR-002 and
