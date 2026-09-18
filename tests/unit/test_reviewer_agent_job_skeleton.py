@@ -2,10 +2,10 @@
 to `.github/workflows/claude-agents-pipeline.yml`").
 
 Per ADR 0008/ADR 0009 and FR-002/contracts/automation-triggers.md's
-tool-grant table, this task adds an inert `reviewer-agent` job -- gated by
-an `if: false` placeholder until Phase 3 (T106) wires its real trigger --
-that establishes reviewer's own isolated secret and tool grant ahead of
-that trigger wiring:
+tool-grant table, this task adds a `reviewer-agent` job -- originally
+gated by an `if: false` placeholder, since replaced by its real trigger
+condition (issue #143, T106; see `test_reviewer_agent_trigger.py`) -- that
+establishes reviewer's own isolated secret and tool grant:
 
 - no `github_token` input on its `claude-code-action` step (mirroring
   `dev-agent`'s existing omission, so it authenticates as the Claude
@@ -105,20 +105,6 @@ def test_dev_agent_job_still_present():
 def test_reviewer_agent_job_exists_exactly_once():
     text = _workflow_text()
     assert len(re.findall(r"^  reviewer-agent:\n", text, re.M)) == 1
-
-
-@skip_until_workflow_diff_applied
-def test_reviewer_agent_job_trigger_is_placeholder_false():
-    # Per T103: "trigger condition left as `if: false` placeholder for
-    # now, wired for real in Phase 3". Must be the job-level `if:` key
-    # (indented one level under the job), with the literal boolean
-    # `false`, not e.g. a quoted string, so GitHub Actions actually
-    # short-circuits the job.
-    job_block = _reviewer_agent_job_block()
-    assert re.search(r"^    if: false\s*$", job_block, re.M), (
-        "expected a job-level `if: false` placeholder directly under "
-        "`reviewer-agent:`"
-    )
 
 
 @skip_until_workflow_diff_applied
