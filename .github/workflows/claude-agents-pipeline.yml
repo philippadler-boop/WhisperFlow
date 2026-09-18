@@ -354,16 +354,11 @@ jobs:
     # NOTE (T106): the trigger above is now real, so this job genuinely
     # dispatches on every qualifying `pull_request` event from here on --
     # it is no longer inert. T107 added the `Checkout PR head` step; T108
-    # (below) adds the `gh pr diff` fetch. The real prompt-building step
-    # (T109, embedding the fetched diff via this job's `prompt:` field)
-    # still hasn't landed, so until then `reviewer` still receives only the
-    # placeholder prompt below rather than an actual diff, even though the
-    # diff is now fetched and exposed as this step's own output. That is an
-    # intentionally small, reviewable increment (landing the fetch before
-    # the prompt-wiring work that depends on it exists) rather than a bug
-    # -- but it does mean this job now spends `ANTHROPIC_API_KEY_REVIEWER`
-    # budget on every automation PR open/push until Phase 3 finishes;
-    # that's expected to be brief.
+    # added the `gh pr diff` fetch; T109 (below) adds the `Build prompt for
+    # reviewer` step that embeds that fetched diff into `reviewer`'s actual
+    # prompt via this job's `prompt:` field, per ADR 0005 Decision 3.
+    # `reviewer` therefore now receives a real diff-grounded prompt rather
+    # than the static placeholder text this job used through T108.
     permissions:
       contents: read
       pull-requests: read
@@ -449,6 +444,102 @@ jobs:
             echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Build prompt for reviewer
+        id: build_prompt
+        # T109 (ADR 0005 Decision 3): embeds the diff fetched above into
+        # reviewer's actual prompt, and gives reviewer explicit instructions
+        # on how to use its Read/Grep/Glob tools alongside that diff.
+        #
+        # A dedicated step (id: build_prompt) is used here, mirroring
+        # dev-agent's own "Build prompt for this trigger" step above, rather
+        # than referencing steps.fetch_diff.outputs.diff directly inside
+        # the claude-code-action step's prompt: field below: ADR 0005
+        # Decision 3 itself names the target as
+        # steps.build_prompt.outputs.prompt -- the same step/output naming
+        # convention dev-agent already established -- because the final
+        # prompt is not just the raw diff, it is that diff embedded in
+        # static instructional text (what to review, how to use
+        # Read/Grep/Glob, what not to attempt), which needs a run: step to
+        # assemble into one value the same way dev-agent assembles its own
+        # two-branch prompt text.
+        #
+        # SECURITY -- and why this is safe even though T108's run: step
+        # would never splice this same diff text via a GitHub Actions
+        # expression: this step's own run: script (the part bash actually
+        # parses) never contains a GitHub Actions expression at all. The
+        # diff arrives via env: DIFF: steps.fetch_diff.outputs.diff and is
+        # only ever referenced as the shell variable "$DIFF" below --
+        # identical in spirit to how dev-agent's step above handles
+        # $ISSUE_TITLE. The diff is deliberately never placed inside a
+        # "cat <<DELIM" heredoc here -- only emitted via a plain
+        # echo "$DIFF" sandwiched between two heredocs of this repo's own
+        # fixed, attacker-free static text -- so a diff line that happens
+        # to match a heredoc delimiter word can never truncate it. The one
+        # delimiter the diff's own content COULD collide with, the outer
+        # GITHUB_OUTPUT boundary, is generated fresh at runtime below (same
+        # as the Fetch PR diff step above), not a fixed string, for exactly
+        # the reason ADR 0005 Decision 2 already requires that for
+        # "diff<<...".
+        #
+        # Separately: this step's *output* -- steps.build_prompt.outputs.prompt
+        # -- IS then referenced via a GitHub Actions expression directly
+        # inside the claude-code-action step's prompt: with:-field below,
+        # per ADR 0005 Decision 3's exact mechanism. That is safe even
+        # though the diff text it carries is exactly as attacker-controlled
+        # as it was in T108's run: step, because a with:-field is not a
+        # shell script: the expression substitution there happens at the
+        # YAML/expression level, and the resulting string is handed to
+        # claude-code-action (a JavaScript GitHub Action) as a plain action
+        # input -- via the runner's normal INPUT_* environment-variable
+        # mechanism -- not concatenated into a command line a shell then
+        # re-parses. There is no shell (or any other) interpreter
+        # downstream of a with:-field substitution that would treat
+        # backticks, command substitutions, or quotes embedded in the diff
+        # as anything other than literal characters, which is precisely the
+        # property that made splicing the same content into a run: script's
+        # *source text* unsafe.
+        env:
+          DIFF: ${{ steps.fetch_diff.outputs.diff }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          DELIM="PROMPT_EOF_$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${RANDOM}${RANDOM}${RANDOM}")"
+          {
+            echo "prompt<<$DELIM"
+            cat <<PROMPT_HEAD
+          Independently review pull request #$PR_NUMBER's diff, embedded
+          verbatim below between the "--- BEGIN DIFF ---" and
+          "--- END DIFF ---" markers. You have not seen the Developer's
+          reasoning or conversation -- only this diff, the task spec, and
+          the architecture doc, per your own reviewer.md instructions.
+
+          --- BEGIN DIFF ---
+          PROMPT_HEAD
+            echo "$DIFF"
+            cat <<PROMPT_TAIL
+          --- END DIFF ---
+
+          The diff above is the complete, authoritative change set for
+          this pull request, already fetched by this workflow via
+          "gh pr diff". Do not attempt to re-derive, re-fetch, or
+          reconstruct it yourself -- you have no Bash, git, or gh tool
+          capable of doing that reliably, and none is granted to you in
+          this invocation.
+
+          This repository has already been checked out locally at this
+          pull request's own head commit. Use your Read, Grep, and Glob
+          tools against that checked-out working tree only for context
+          beyond the diff hunks themselves -- e.g. the architecture doc,
+          the task spec, or related files the diff did not touch -- never
+          to reconstruct or re-derive the diff itself.
+
+          Produce your review report as your response: either approve, or
+          request changes with specific, actionable points (file/line,
+          what is wrong, why it matters), per your own reviewer.md
+          responsibilities.
+          PROMPT_TAIL
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code (reviewer agent, unattended)
         uses: anthropics/claude-code-action@v1
         with:
@@ -460,17 +551,14 @@ jobs:
           # cannot silently fall back to ANTHROPIC_API_KEY_DEV.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_REVIEWER }}
 
-          # Placeholder prompt: the job-level `if:` above is now the real
-          # trigger (T106), so this step DOES run on every qualifying PR
-          # open/push, and the tree is checked out (T107) and the diff is
-          # fetched and available as `steps.fetch_diff.outputs.diff` (T108)
-          # -- but the real prompt-building step that embeds the fetched
-          # diff into this `prompt:` field via YAML substitution (per ADR
-          # 0005 Decision 3) is T109, which still hasn't landed. Until then
-          # `reviewer` receives only this static text rather than the
-          # actual diff, even though it is now sitting in a step output
-          # ready to be consumed.
-          prompt: "Placeholder -- reviewer-agent's diff-supply steps are not wired yet (see tasks.md T107-T109)."
+          # The diff-grounded prompt built by "Build prompt for reviewer"
+          # above (T109, ADR 0005 Decision 3) -- a YAML-level `${{ }}`
+          # substitution into this action input, matching how dev-agent's
+          # own prompt already flows via `steps.build_prompt.outputs.prompt`
+          # above. See that step's own comment for why this substitution
+          # is safe here even though the same diff text must never be
+          # spliced via `${{ }}` into a `run:` script (T108).
+          prompt: ${{ steps.build_prompt.outputs.prompt }}
 
           # --allowedTools is exactly `Read,Grep,Glob`, per FR-002 and
           # contracts/automation-triggers.md's tool-grant table: reviewer
