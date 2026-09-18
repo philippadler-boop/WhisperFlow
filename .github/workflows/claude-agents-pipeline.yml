@@ -43,6 +43,15 @@ name: Claude Agents Pipeline
 # trusting it on real work, same discipline as every prior change here.
 # `reviewer-agent`'s new `pull_request` trigger (T106) is equally
 # unverified until the same throwaway-PR smoke test also exercises it.
+# That "multi-line GITHUB_OUTPUT prompt-building step" scope explicitly
+# includes reviewer-agent's own, more complex two-step-chained instance of
+# the pattern (T109): "Fetch PR diff" writes a randomized-delimiter
+# GITHUB_OUTPUT, and "Build prompt for reviewer" both reads that prior
+# step's output via env: and writes its own randomized-delimiter
+# GITHUB_OUTPUT in turn, before that value is finally substituted into
+# claude-code-action's `prompt:` with:-field -- one more hop than the
+# single-step instances of this pattern elsewhere in this file, and thus
+# with correspondingly more surface for a throwaway-PR run to exercise.
 on:
   issues:
     types: [labeled]

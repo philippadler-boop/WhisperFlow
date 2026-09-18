@@ -32,6 +32,7 @@ file dependency-free like its siblings.)
 from __future__ import annotations
 
 import re
+import textwrap
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -125,7 +126,11 @@ def test_build_prompt_step_is_after_fetch_diff_and_before_claude_code_action():
 
 def test_build_prompt_step_reads_diff_via_env_block_not_run_splice():
     step_block = _build_prompt_step_block()
-    env_match = re.search(r"^\s*env:\n((?:^\s{10}.+\n)+)", step_block, re.M)
+    # `\s+` (not a fixed `\s{10}`) so this doesn't silently stop matching --
+    # and, like the heredoc test above, stop asserting anything -- if this
+    # step's indentation width ever changes for unrelated formatting
+    # reasons.
+    env_match = re.search(r"^\s*env:\n((?:^[ \t]+.+\n)+)", step_block, re.M)
     assert env_match, "expected an `env:` block on Build prompt for reviewer"
     env_block = env_match.group(1)
     assert "DIFF: ${{ steps.fetch_diff.outputs.diff }}" in env_block, (
@@ -188,9 +193,29 @@ def test_build_prompt_never_places_diff_inside_a_fixed_heredoc():
     # happens to equal the fixed delimiter word would silently truncate
     # the prompt (the same collision class ADR 0005 Decision 2 already
     # flags for the Fetch PR diff step's own delimiter).
+    #
+    # `_run_script_body` returns the `run: |` block's RAW text exactly as
+    # it appears in the YAML file -- still indented (10 spaces for this
+    # step's content) because YAML's block-scalar parser is what strips
+    # that indentation at runtime, not this helper. The `cat <<WORD`
+    # heredoc terminators (`PROMPT_HEAD`, `PROMPT_TAIL`) are therefore
+    # never flush-left in `run_body` itself, even though they must be (and
+    # are, post-dedent) for the real heredocs to close correctly. Dedent
+    # here first so the regex below sees exactly what bash actually parses
+    # at runtime -- an earlier version of this test anchored the closing
+    # delimiter at column 0 against the raw (still-indented) text, which
+    # made `re.finditer` match zero times and silently skipped this test's
+    # only assertion regardless of where `$DIFF` actually appeared.
     step_block = _build_prompt_step_block()
-    run_body = _run_script_body(step_block)
-    for match in re.finditer(r"cat <<(\S+)\n(.*?)^\1\s*$", run_body, re.M | re.S):
+    run_body = textwrap.dedent(_run_script_body(step_block))
+    heredoc_matches = list(re.finditer(r"cat <<(\S+)\n(.*?)^\1\s*$", run_body, re.M | re.S))
+    assert heredoc_matches, (
+        "expected at least one `cat <<WORD ... WORD` heredoc in the dedented "
+        "run: script body -- if this no longer finds any, the regex itself "
+        "may have gone vacuous again (e.g. via a further formatting change) "
+        "and this test would silently stop checking anything"
+    )
+    for match in heredoc_matches:
         heredoc_body = match.group(2)
         assert "$DIFF" not in heredoc_body, (
             f"found $DIFF referenced inside a fixed-delimiter heredoc "
