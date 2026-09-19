@@ -92,7 +92,19 @@ def _reviewer_claude_step_block(job_block: str) -> str:
         re.M | re.S,
     )
     assert match, "no anthropics/claude-code-action step found in reviewer-agent job"
-    return match.group(1)
+    step_block = match.group(1)
+    # Trim trailing blank/comment-only lines: T112 added an "Obtain
+    # non-default GitHub identity for posting the review" step immediately
+    # after this one, preceded by its own explanatory comment block. That
+    # comment describes the *next* step, not this one, but the lookahead
+    # above only stops at the next literal `- name:` line, so without this
+    # trim it would incorrectly be swept into this step's own captured
+    # content (and, e.g., its prose mentioning `github_token:` would wrongly
+    # trip `test_reviewer_step_omits_github_token` below).
+    lines = step_block.splitlines(keepends=True)
+    while lines and (lines[-1].strip() == "" or lines[-1].lstrip().startswith("#")):
+        lines.pop()
+    return "".join(lines)
 
 
 def test_dev_agent_job_still_present():

@@ -72,9 +72,16 @@ def _build_prompt_step_block() -> str:
 
 
 def _claude_code_step_block() -> str:
+    # Scoped with a next-step lookahead (mirroring `_build_prompt_step_block`
+    # above), not `\Z` (end of job block): T112 added an "Obtain non-default
+    # GitHub identity for posting the review" step immediately after this
+    # one, so the claude-code-action step is no longer the last step in
+    # `reviewer-agent`, and a `\Z`-anchored match would incorrectly capture
+    # that later step's own `run:` block too.
     job_block = _reviewer_agent_job_block()
     match = re.search(
-        r"^      - name: Run Claude Code \(reviewer agent, unattended\)\n(.*?)\Z",
+        r"^      - name: Run Claude Code \(reviewer agent, unattended\)\n"
+        r"(.*?)(?=^      - name:|\Z)",
         job_block,
         re.M | re.S,
     )
