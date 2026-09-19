@@ -585,6 +585,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Claude Code (reviewer agent, unattended)
+        id: run_reviewer
         uses: anthropics/claude-code-action@v1
         with:
           # Per ADR 0008: each of the three automation-mode invocations
@@ -627,6 +628,60 @@ jobs:
           # posts reviewer's verdict is a separate workflow step the
           # *workflow* performs, added in a later phase, not something
           # this claude-code-action step does itself.)
+
+      # T112 (ADR 0007 Decision 1): obtains the non-default GitHub identity
+      # a later step (T113) needs to post reviewer's verdict via a real
+      # `gh pr review` call -- posting with the default `${{ github.token }}`
+      # is exactly what ADR 0007 rejects, both because the resulting review's
+      # actor identity would be ambiguous (not clearly "our own automation"
+      # vs. a human) and because GitHub does not cascade new workflow runs
+      # from events performed with the default GITHUB_TOKEN (the same
+      # restriction `dev-agent`'s own `github_token`-omission above already
+      # documents for pushed commits).
+      #
+      # ADR 0007 Decision 1 asks this reuse path to be *confirmed*, not
+      # assumed, before falling back to a dedicated
+      # `actions/create-github-app-token` credential. It is confirmed:
+      # `claude-code-action`'s own `action.yml` declares a first-class
+      # `github_token` output --
+      #
+      #   github_token:
+      #     description: "The GitHub token used by the action (Claude App
+      #       token if available)"
+      #     value: ${{ steps.run.outputs.github_token }}
+      #
+      # -- present verbatim on both the `main` branch and the exact `@v1`
+      # tag this workflow pins above (checked directly against
+      # github.com/anthropics/claude-code-action's `action.yml` at both
+      # refs, not assumed from documentation prose). Because the "Run
+      # Claude Code (reviewer agent, unattended)" step above deliberately
+      # omits its own `github_token` input, the action authenticates
+      # internally as the Claude GitHub App -- the same identity
+      # `dev-agent`'s equally `github_token`-omitted invocation already
+      # authenticates as when it pushes commits (confirmed by T102's
+      # `git log --format='%an <%ae>'` check, showing `claude[bot]`) -- and
+      # then surfaces that exact App token back out as
+      # `steps.run_reviewer.outputs.github_token`. A subsequent plain `gh`
+      # step can reuse it directly. This is the primary path ADR 0007
+      # Decision 1 describes; since it exists, the
+      # `actions/create-github-app-token` fallback and the associated new
+      # Manual Setup flag (ADR 0007 Consequences) are not needed here.
+      #
+      # This step only captures and validates that token as its own output
+      # (`token`) -- it does not post anything itself. T113 consumes
+      # `steps.get_review_identity.outputs.token` for the actual
+      # `gh pr review --approve` / `--request-changes` dispatch.
+      - name: Obtain non-default GitHub identity for posting the review
+        id: get_review_identity
+        env:
+          REVIEW_TOKEN: ${{ steps.run_reviewer.outputs.github_token }}
+        run: |
+          if [ -z "$REVIEW_TOKEN" ]; then
+            echo "::error::claude-code-action's github_token output was empty -- cannot post reviewer's verdict without the non-default Claude GitHub App identity ADR 0007 Decision 1 requires. Refusing to fall back to the default GITHUB_TOKEN (FR-013)."
+            exit 1
+          fi
+          echo "::add-mask::$REVIEW_TOKEN"
+          echo "token=$REVIEW_TOKEN" >> "$GITHUB_OUTPUT"
 
   # T104 (feature 002, reviewer/qa automation): job skeleton only, mirroring
   # T103's reviewer-agent skeleton above. The trigger condition below is a
