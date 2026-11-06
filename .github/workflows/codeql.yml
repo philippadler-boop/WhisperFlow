@@ -31,7 +31,7 @@ jobs:
             echo "has_python=false" >> "$GITHUB_OUTPUT"
             echo "No .py files tracked yet -- nothing for CodeQL to scan. This is expected before T001/T002 land."
           fi
-      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+      - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         if: steps.check.outputs.has_python == 'true'
         with:
           languages: python
